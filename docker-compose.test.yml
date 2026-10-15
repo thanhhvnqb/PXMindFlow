@@ -1,0 +1,36 @@
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: mindflow_test
+      POSTGRES_DB: mindflow_test
+      POSTGRES_PASSWORD: ${TEST_DB_PASSWORD:?Set ephemeral TEST_DB_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U mindflow_test -d mindflow_test"]
+      interval: 2s
+      retries: 20
+  tests:
+    build: ./backend
+    image: mindflow-test-api
+    working_dir: /app
+    volumes:
+      - ./backend:/app:ro
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mindflow_test:${TEST_DB_PASSWORD}@db/mindflow_test
+      JWT_SECRET: ${TEST_JWT_SECRET:?Set ephemeral TEST_JWT_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "alembic upgrade head && alembic check && pytest -p no:cacheprovider"]
+  api:
+    image: mindflow-test-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://mindflow_test:${TEST_DB_PASSWORD}@db/mindflow_test
+      JWT_SECRET: ${TEST_JWT_SECRET:?Set ephemeral TEST_JWT_SECRET}
+    ports:
+      - "127.0.0.1:18080:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+    profiles: ["client-integration"]
