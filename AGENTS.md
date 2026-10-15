@@ -1,196 +1,285 @@
-# AGENTS.md — MindFlow App
+# AGENTS.md — MindFlow (Offline-First Productivity)
 
-> Read this file in full before making any changes to the project.
+> Read this entire file before making changes. This document is the standing contract for coding agents. If the repository differs, inspect it first and reconcile docs with actual code; do not delete user work.
 
----
+## 1. Product and scope
 
-## 1. Project Overview
+**MindFlow** is a polished, fast, privacy-conscious, offline-first personal productivity app inspired by the usability of TickTick, but with its own identity, original visuals, and independently implemented code. Do not copy TickTick trademarks, icons, proprietary assets, text, or pixel-for-pixel layouts.
 
-**MindFlow** — mobile app for mental wellness and personal productivity.
+**Targets (one Flutter codebase):** Android, iOS, Windows, macOS, Linux, and Web. All six must be considered in architecture, routing, keyboard/mouse/touch input, persistence, and CI; distinguish actual verified builds from targets that cannot be built on the current host.
 
-**Stack:** Flutter (iOS/Android) · Backend: Supabase, Python (FastAPI), and/or Go (can be mixed/hybrid) · PostgreSQL · Redis · Celery · FCM · Docker
+**Core MVP modules (all required):**
 
-| Module | Description | Status |
-|---|---|---|
-| **Quote** | Motivational quotes on morning schedule or custom time slots | ✅ Active |
-| **Meditation** | Guided breathing exercises and meditation sessions | ✅ Active |
-| **Flow / Pomodoro** | Focus timer with work/break cycle alerts | ✅ Active |
-| **Music** | Real-time AI-generated white noise mixer | ✅ Active |
-| **Video** | Curated lifestyle & mindfulness video library | ✅ Active |
+1. **Tasks:** Inbox, lists/projects, CRUD, subtasks, descriptions/notes, tags, priority, due date/time, reminders, recurrence, completion, Today/Upcoming/All/Completed views; filtering, sorting, drag-and-drop where applicable, and bulk actions.
 
-> The backend is developed and run entirely via Docker (for Python/Go) or local emulator (for Supabase). Do not run services directly on the host. The backend stack can be mixed (e.g., Supabase for DB/Auth, Go for high-performance APIs, and FastAPI for async workers/processing).
+2. **Eisenhower Matrix:** four urgent/important quadrants with drag/drop and quick editing; single canonical task record shared with task views.
 
----
+3. **Habit Tracker:** habits, schedules/targets, daily check-ins, streaks, progress/history; correctly handle timezone and local calendar days.
 
-## 2. Repository Structure
+4. **Calendar:** day/week/month views, tasks on dates, navigate/edit/create tasks, recurring task instances; avoid creating duplicate task data.
 
-```
+5. **Pomodoro / Focus:** configurable focus, short/long breaks, start/pause/resume/skip, persisted sessions and daily totals; timer based on monotonic/elapsed timestamps when available rather than assuming periodic callbacks fire on time.
+
+6. **Search:** fast offline full-text search over authorized local tasks/lists/notes/habits, with filters and navigation to results.
+
+**Out of scope for MVP:** collaboration, AI assistant, social feeds, media streaming, paid subscriptions, remote push infrastructure, and complex integrations. Do not recreate the old Quote/Meditation/Music/Video modules.
+
+**Design requirements:** modern, tasteful, original UI; Material 3 foundations with custom tokens; light/dark themes, responsive layout (compact navigation on mobile; navigation rail/sidebar and multi-pane on large screens), accessible contrast, keyboard shortcuts, focus states, screen-reader semantics, animations without excessive motion, and `en`/`vi` localization. Avoid placeholder-only screens; major flows must work end-to-end.
+
+**Default language:** English (`en`) is the default application language on all platforms, including first launch when no language preference has been saved. Vietnamese (`vi`) remains an optional localization selected by the user; do not automatically default to Vietnamese or another language based on the device/browser locale. Developer documentation and agent responses also default to English unless the user explicitly requests another language.
+
+**Development language:** Use English by default for code identifiers, code comments, documentation, setup/testing instructions, logs and diagnostic messages, test descriptions, commit messages, pull requests, issue discussions, and agent/developer communication. Use another language only when explicitly requested or when writing localized product content such as Vietnamese translations.
+
+## 2. Approved architecture and stack
+
+- **Frontend:** Flutter stable, Dart; Riverpod (version compatible with the installed SDK), GoRouter, Dio, `flutter_localizations` + intl, `drift`/`drift_flutter` for reactive typed SQLite, secure credential storage where supported. Use package versions that are current and mutually compatible; pin them in the lockfile.
+
+- **Local-first persistence:** SQLite is the sole client-side source of truth for domain reads and user writes. Use Drift on native and its SQLite/WASM backend on Web with packaged `sqlite3.wasm` and worker assets. Browser storage durability/availability varies (private mode, eviction, unsupported APIs); detect and communicate degraded persistence; do not claim Web offline persistence is guaranteed.
+
+- **Backend:** **FastAPI (Python)** + Pydantic + SQLAlchemy async + Alembic + PostgreSQL, with REST endpoints for auth and synchronization. Keep backend stateless for horizontal scaling to thousands of users; add queues/caches only when a demonstrated requirement arises.
+
+- **Deployment/dev:** Docker Compose for API and PostgreSQL; Dockerfile and `.env.example`. No Supabase requirement, no Redis/Celery by default. Backend processes run in containers during local development.
+
+- **Architecture:** feature-first Flutter `data/`, `domain/`, `presentation/`; repositories abstract persistence/sync; no widgets making SQL or REST calls. Backend split into routers, services, persistence models, schema, and sync service.
+
+- **Security:** user accounts and per-user tenant isolation, secure password hashing, short-lived access tokens and refresh-token rotation/revocation (or well-reviewed equivalent); HTTPS in deployment; never expose PostgreSQL credentials to Flutter; every API query and mutation must be scoped to authenticated user.
+
+## 3. Repository layout
+
+```text
 mindflow/
 ├── AGENTS.md
-├── docker-compose.yml          ← Full dev stack (api, worker, beat, db, redis)
-├── docker-compose.prod.yml
+├── README.md
 ├── .env.example
-├── frontend/                   ← Flutter app
-│   └── lib/
-│       ├── core/               ← Theme, router, DI, constants
-│       ├── features/           ← quote/ meditation/ flow/ music/ video/
-│       └── shared/             ← Shared widgets & utilities
-├── backend/                    ← Python (FastAPI) and/or Go backend (if used/mixed)
-│   └── (structure depends on chosen stack)
-├── supabase/                   ← Supabase config and migrations (if used/mixed)
+├── docker-compose.yml
+├── docker-compose.prod.yml      # when deployment is implemented
+├── frontend/
+│  ├── lib/
+│  │  ├── app/           # bootstrap, router, localization, themes
+│  │  ├── core/           # db, sync, network, auth, time, widgets
+│  │  ├── features/
+│  │  │  ├── tasks/
+│  │  │  ├── matrix/
+│  │  │  ├── habits/
+│  │  │  ├── calendar/
+│  │  │  ├── pomodoro/
+│  │  │  └── search/
+│  │  └── shared/
+│  ├── test/
+│  ├── integration_test/
+│  └── web/              # include SQLite WASM/worker assets
+├── backend/
+│  ├── app/
+│  │  ├── core/           # config, auth, DB, security
+│  │  ├── models/
+│  │  ├── schemas/
+│  │  ├── routers/
+│  │  ├── services/         # includes sync engine
+│  │  └── repositories/
+│  ├── alembic/
+│  ├── tests/
+│  └── Dockerfile
 └── docs/
-    ├── shared/                 ← database.md · api_conventions.md · notifications.md · docker.md · state_management.md
-    ├── quote/spec.md
-    ├── meditation/spec.md
-    ├── flow/spec.md
-    ├── music/spec.md
-    └── video/spec.md
+  ├── architecture.md
+  ├── database.md
+  ├── sync_protocol.md
+  ├── api.md
+  ├── ui_design.md
+  ├── testing.md
+  └── features/           # tasks/matrix/habits/calendar/pomodoro/search
 ```
 
-### Backend Structure Options
+Adapt to an existing structure without needless destructive renames. Write missing docs before or alongside implementation.
 
-#### Python (FastAPI):
-```
-backend/
-├── app/
-│   ├── core/                   ← Config, DB, auth, middleware
-│   ├── features/               ← quote/ meditation/ flow/ music/ video/
-│   └── shared/                 ← Utils, base schemas
-├── alembic/                    ← Database migrations
-├── tests/                      ← Backend tests
-└── Dockerfile
-```
+## 4. Data model and invariants
 
-#### Go (Clean Architecture):
-```
-backend/
-├── cmd/                        ← Entrypoints (main.go)
-├── pkg/
-│   ├── core/                   ← Config, middleware, common DB client
-│   └── features/               ← quote/ meditation/ flow/ music/ video/
-├── migrations/                 ← Go migration scripts (e.g., goose, migrate)
-├── tests/                      ← Integration/unit tests
-└── Dockerfile
-```
+- Use UUIDs generated **on the client** for syncable records, stable across devices. All owned records carry `user_id` (server authoritative), `id`, `created_at`, `updated_at`, `deleted_at` (nullable tombstone), and monotonically increasing **server `version`** per record. Client also tracks `base_version` and local dirty/pending state; don't trust a client-provided `user_id`.
 
-#### Supabase:
-```
-supabase/
-├── migrations/                 ← SQL schema, triggers, and RLS policies
-└── functions/                  ← Supabase Edge Functions (optional)
-```
+- Minimum entities: `user`, `device`, `task_list`, `task`, `subtask` (or task parent relation), `tag`, `task_tag`, `habit`, `habit_checkin`, `focus_session`, plus `sync_change` server log and `sync_outbox` / `sync_state` client tables. Add `task_reminder` and recurrence specification as needed.
 
-Each feature folder (both frontend and backend) follows the same internal structure depending on the stack:
-- **Backend (Python/FastAPI):** `models.py` · `schemas.py` · `repository.py` · `service.py` · `router.py`
-- **Backend (Go):** `models/` · `repository/` · `service/` · `handler/`
-- **Backend (Supabase):** Managed via database schema/tables, RLS policies in migrations, and optional Edge Functions
-- **Flutter:** `data/` (datasources, models, repositories) · `domain/` (entities, usecases) · `presentation/` (providers, screens, widgets)
+- Eisenhower quadrant is derived from canonical task `is_urgent` and `is_important` booleans (independent of priority unless explicitly mapped by the user).
 
----
+- The calendar is a view onto tasks/due dates and generated recurring occurrences; never replicate tasks into a separate calendar source of truth.
 
-## 3. Agent Rules
+- Persist timestamps as UTC instants; separately store IANA timezone and local date when semantics depend on a person's day (habits, due date without time, recurrence). Define daylight-saving and cross-timezone behavior in docs.
 
-### Before touching any code — read the relevant doc
+- Store recurrence as explicit rule metadata plus exception/occurrence completion data (rather than eagerly cloning infinite future tasks). Record completion per occurrence with a stable occurrence key.
 
-| Changing... | Read first |
-|---|---|
-| Quote module | `docs/quote/spec.md` |
-| Meditation module | `docs/meditation/spec.md` |
-| Flow module | `docs/flow/spec.md` |
-| Music module | `docs/music/spec.md` |
-| Video module | `docs/video/spec.md` |
-| DB / models | `docs/shared/database.md` |
-| API endpoints | `docs/shared/api_conventions.md` |
-| Notifications | `docs/shared/notifications.md` |
-| Docker / env | `docs/shared/docker.md` |
-| Flutter state | `docs/shared/state_management.md` |
+- Make uniqueness, indexes, FK constraints and cascading behavior explicit; server enforces ownership on all joins and related records. Use FTS5 on compatible native SQLite; verify fallback/compatibility on web.
 
-### After every meaningful change — update the docs
+- No destructive overwrites or unsafe purges while unsent mutations exist. Tombstone retention and device resync recovery are specified in the sync protocol.
 
-- New/renamed/removed endpoint → update `spec.md` + `api_conventions.md`
-- DB schema change → update `database.md` + relevant `spec.md`
-- Docker or env change → update `docker.md`
-- New dependency → note it in the module's `spec.md`
+## 5. Offline-first sync: mandatory correctness protocol
 
-> ⚠️ Docs are the single source of truth. Never leave code contradicting docs.
+**All normal user writes are local first.** Save the domain mutation AND corresponding outbox entry atomically in a single SQLite transaction; update UI immediately. A sync worker is the only layer that exchanges mutations with the server. Sync on app startup, reconnect, foreground/resume, and manually; use debouncing, batching and exponential backoff + jitter. Do not assume background jobs run reliably on every OS or on Web.
 
-### Never do
+### Protocol
 
-- ❌ Run backend services outside Docker (Python/Go) or local emulator (Supabase)
-- ❌ Hard-code secrets or credentials anywhere
-- ❌ Skip reading docs before modifying a module
-- ❌ Leave docs outdated or contradicting current code
-- ❌ Rename an endpoint or DB column without a migration
-- ❌ Delete a DB migration already applied (Alembic or Supabase SQL/Go migrations)
-- ❌ Change the Docker Compose service topology without developer approval
+1. **Identity and ordering:** each mutation has unique `operation_id` (UUID), `device_id`, target `(entity_type, entity_id)`, operation type (`create/update/delete`), `base_version`, payload, and client-local order. Use an outbox and per-account sync cursor. Preserve dependency order (e.g. list before child task); sequence multiple pending edits to the same entity or coalesce safely, never drop an unacknowledged operation.
 
----
+2. **Push:** authenticate `/api/v1/sync/push`. Server processes mutations transactionally with a unique `(user_id, operation_id)` idempotency constraint and returns per-operation `applied`, `duplicate`, `conflict` or validation failure, along with server versions and canonical records. Retrying the same operation must not apply it twice.
 
-## 4. Docker & local dev servers
+3. **Concurrency:** compare `base_version` with the current authoritative `version` in PostgreSQL using transactional locking or conditional updates. The server, not client timestamps, determines version ordering. If versions match, apply mutation, increment record version and append an ordered durable change-log item **in the same database transaction**. If they do not match, return conflict, never silently use last-write-wins for shared editable fields.
 
-### Docker (for Python/Go backends)
+4. **Pull:** `/api/v1/sync/pull?cursor=...` returns authorized changes in **monotonic server sequence** order, paginated, including tombstones, plus next cursor. Advance the client cursor only after all changes in that page are committed in the same SQLite transaction. Distinguish empty page from missing/expired cursor; support full rebootstrap preserving outbox.
+
+5. **Push/pull race:** serialize local sync for an account (and avoid overlapping cycles). Do not apply remote snapshots over entities with pending local edits. After push acknowledgement, reconcile canonical record with local pending operations; pull and rebase/retry as needed. Server change-log must be durable and yield a consistent cut for pagination; account for concurrent server commits when assigning publish order.
+
+6. **Conflicts:** implement an explicit conflict queue with local, remote, and common-base versions if available. Safe auto-merges only when fields/operations are provably independent (e.g. disjoint fields with reliable base snapshots; distinct habit check-ins). Otherwise show user a conflict resolution UI: **Keep mine / Keep server / Review differences**. Resolving emits a new mutation against the latest server version. Never discard local changes without explicit action or verified safe merge.
+
+7. **Deletes:** use tombstones, not immediate hard deletes. Concurrent edit-versus-delete is a visible conflict; no silent resurrection. Repeated delete operations are idempotent. Cleanup requires documented retention policy and a safe full-resync path for inactive devices.
+
+8. **Multi-device/security:** authenticate every request, enforce ownership on each mutation and pull entry; forbid editing another user's records even via guessed UUIDs. Handle token expiry, logout/account switching, and per-account local DB isolation. On logout, do not silently destroy an unsynced outbox; display options to sync/retain/discard with confirmation.
+
+9. **Recovery:** network timeouts after server commit, retry duplicates, app crashes between steps, bad clocks, partial batches, migrations, browser data eviction, and revoked devices must have documented behavior and integration tests.
+
+**Required test matrix:** offline create/edit/delete then reconnect; two devices edit same field; two devices edit different fields; edit/delete race; repeat requests and lost ACK; crash after push before local ACK; out-of-order/overlapping pull pages; concurrent push/pull; offline recurring task completion; habit check-in duplicates; long-disconnected device after tombstone cleanup; isolation between two users. No sync feature is complete without passing automated tests for these cases.
+
+## 6. UX and functionality acceptance criteria
+
+- Launch directly into a useful task-focused shell. Navigation to Tasks, Matrix, Habits, Calendar, Focus, and Search is consistent across platforms.
+
+- Quick-add task is always easily accessible; keyboard shortcuts and command/search entry points on desktop; gestures/touch targets on mobile.
+
+- Tasks, matrix, calendar, and search reflect the same local DB updates without refresh. Optimistic writes remain visible while offline.
+
+- Habit history and Pomodoro sessions persist across restart and sync across devices. Do not rely on an in-memory timer or transient screen state as the record of truth.
+
+- Show clear sync status (offline / syncing / synced / attention required), pending-operation count, retry behavior, and actionable conflict indication; never mislabel an unsynced edit as synced.
+
+- Empty/loading/error states, forms, validation, confirmation for destructive actions, visual polish, responsive breakpoints, and accessibility must be implemented, not merely mocked.
+
+- Deliver small coherent vertical slices, with real local persistence, sync and tests for each slice, rather than building all UI mocks first.
+
+## 7. Engineering conventions and agent behavior
+
+- **Before coding:** inspect repository and existing code, read module docs and architecture/database/sync docs relevant to changes, state assumptions and implementation order. If documentation is missing, create it. Do not blindly replace files.
+
+- **After changes:** update docs, migrations, tests and examples in the same change; report what is done, commands run, test results, limitations and next work.
+
+- **Dart:** `snake_case.dart`, `PascalCase` types, `camelCase` members; immutable UI models where practical; Riverpod for state, GoRouter for routes, async cancellation/disposal safeguards.
+
+- **Python:** format and lint consistently, type annotate service boundaries; SQLAlchemy 2.x async; Pydantic schemas; Alembic migrations; Pytest async integration tests.
+
+- **SQL:** `snake_case` identifiers, parameterized queries, DB constraints and indexes; never edit or delete an already applied migration; create a new migration.
+
+- **API:** prefix `/api/v1/`, typed and versioned request/response contracts, ISO 8601 UTC datetimes, structured error codes, pagination; sync conflicts are first-class results rather than generic 500s.
+
+- **Secrets:** `.env` and OS secure storage, never checked-in credentials; redact personal data and auth tokens from logs. Add rate limits, CORS allowlist, input validation, and pagination bounds.
+
+- **Verification:** run `flutter analyze`, `flutter test`, targeted Flutter integration tests, backend unit/integration tests and migration checks. Build/test each platform when host tooling is available; explicitly list untested targets (iOS/macOS usually need macOS). No fake 'all platforms passed' claims.
+
+- **Never:** bypass SQLite for user-facing domain writes, talk directly from Flutter to PostgreSQL, use silent last-write-wins, hard-delete pending data, turn off tests for expediency, ship fake persistence, copy TickTick proprietary design/assets, hardcode secrets, or silently restructure Docker services.
+
+## 7.1. Codex execution permissions and host Docker safety
+
+These rules apply to Codex CLI in addition to the engineering conventions above. They are agent instructions, not an operating-system security boundary. Actual permissions are enforced by Codex configuration and the host OS.
+
+### General execution policy
+
+**Default behavior: execute autonomously whenever possible.** Do not request approval for commands that are permitted by the active sandbox and comply with the rules below.
+
+- Treat the currently opened MindFlow repository as the authorized write workspace.
+- **Read-only operations:** Run commands such as `ls`, `find`, `rg`, `grep`, `cat`, `head`, `git status`, `git diff`, and `git log` without requesting approval whenever permitted by the sandbox. Reading files outside the repository is allowed if normal OS permissions permit it.
+- **Workspace operations:** Freely create, edit, move, and delete non-protected project files, install project-local dependencies, generate code, format, lint, build, and run tests.
+- **Local development:** Run development servers, project-local tools, and non-destructive database migrations without unnecessary confirmation.
+- **Network access:** Use network access for ordinary development tasks, including installing dependencies, accessing documentation, and downloading public development resources, when permitted by the sandbox.
+- **Command execution:** Prefer running permitted commands directly rather than requesting elevated permissions. Split compound commands when doing so avoids unnecessary approval prompts.
+- **Approval required:** Request explicit approval before writing outside the workspace, modifying system configuration or global packages, changing system services, or using `sudo`, `su`, `doas`, or equivalent privilege escalation.
+- **Destructive operations:** Request approval before potentially irreversible actions affecting valuable data, including destructive Git operations, deleting databases, or removing persistent project volumes. Routine deletion of generated or temporary project files is permitted.
+- **Security:** Do not access secrets unnecessarily, use external credentials without authorization, or transmit private host files to external services.
+- **Denials:** Never circumvent rejected approval requests through alternative commands, tools, or privilege escalation.
+
+### Docker host
+
+The MindFlow development environment may use the host Docker daemon for backend services and PostgreSQL.
+
+- **Autonomous operations:** Execute project-scoped `docker compose build`, `up`, `ps`, `logs`, `exec`, `run`, `restart`, and non-destructive `down` without requesting approval when permitted by the sandbox.
+- **Project isolation:** Always use a distinct Compose project name, reuse the existing `pxmindflow` development project. Operate only on this project's containers, images, networks, and volumes.
+- **Bind mounts:** Restrict bind mounts to paths within the repository. Never mount host system directories, the host home directory, the filesystem root, or the Docker socket into containers without explicit approval.
+- **Container privileges:** Do not enable privileged containers, host PID/IPC namespaces, host networking, extra host devices, additional Linux capabilities, or relaxed security settings without explicit approval.
+- **Destructive Docker operations:** Request approval before deleting persistent project volumes, resetting PostgreSQL, dropping databases, or performing destructive migrations.
+- **Global Docker operations:** Never execute `docker system prune`, `docker volume prune`, or commands that modify resources belonging to other projects without explicit authorization.
+- **Networking:** Prefer binding published development ports to `127.0.0.1` unless remote access is specifically requested.
+- **Sandbox restrictions:** If a necessary Docker command is blocked by the sandbox, request approval for that specific command. Do not disable the sandbox or request persistent unrestricted access.
+
+### Approval minimization
+
+- Do not ask for confirmation when an operation is already authorized by these rules and permitted by the sandbox.
+- Do not request elevated permissions merely to inspect files, check Git status, search source code, or read logs.
+- Do not interpret read-only access outside the workspace as authorization to modify those files.
+- Ask only when an operation crosses a defined permission boundary, requires elevated privileges, or risks irreversible loss of valuable data.
+- When approval is required, explain the specific operation, affected resources, and reason briefly.
+
+### Security limitation
+
+Access to a rootful host Docker socket may bypass filesystem restrictions even with `workspace-write`. These instructions are behavioral safeguards, not enforced isolation. Use an isolated VM or a constrained Docker daemon if strict security boundaries are required.
+
+## 8. Server development and SSH tunnel testing
+
+Development currently runs on a remote Linux server. Run Docker, Flutter builds,
+and automated tests on that server; open the browser on the developer workstation
+through an SSH tunnel. Keep API and Web ports bound to loopback. Do not expose
+PostgreSQL or development servers publicly to enable testing.
+
+The existing development Compose project is `pxmindflow`. Reuse it to preserve
+its database volume; inspect `docker compose ls -a` before choosing a project name.
+Do not create a new `mindflow` project for an existing `pxmindflow` database.
+
+On the workstation, keep this tunnel running (replace `user@server`):
+
 ```bash
-docker compose up --build          # Start full dev stack
-docker compose up -d               # Start in background
-docker compose logs -f api         # Tail API logs
-docker compose exec api bash       # Shell into API container
-docker compose exec api alembic upgrade head   # Run migrations (FastAPI)
-docker compose exec api pytest     # Run backend tests (FastAPI)
-docker compose down                # Stop all services
-docker compose down -v             # Stop and wipe volumes
+ssh -N -o ExitOnForwardFailure=yes \
+  -L 127.0.0.1:8000:127.0.0.1:8000 \
+  -L 127.0.0.1:8080:127.0.0.1:8080 user@server
 ```
 
-**Key `.env` variables** (copy from `.env.example`):
-```env
-DATABASE_URL=postgresql+asyncpg://mindflow:secret@db:5432/mindflow
-REDIS_URL=redis://redis:6379/0
-JWT_SECRET_KEY=change_me
-FCM_SERVICE_ACCOUNT_PATH=/run/secrets/fcm-key.json
-DEBUG=true
-```
-> Inside Docker Compose, use service names as hostnames (`db`, `redis`) — not `localhost`.
+On the server, run Flutter with `-d web-server --web-hostname 127.0.0.1
+--web-port 8080 --dart-define=API_URL=http://localhost:8000/api/v1`.
+Open `http://localhost:8080` on the workstation, using the configured CORS origin.
+Browser `localhost` means the workstation and reaches the API via the tunnel.
+Health: `http://localhost:8000/health`; Swagger: `http://localhost:8000/docs`.
+If local ports are occupied, select alternate local forwarding ports and update
+the browser origin, CORS and compiled API_URL consistently. Automated checks run
+on the server do not prove that the workstation tunnel/browser has been tested.
 
-### Supabase CLI (for Supabase backend)
+Use [the browser runbook](docs/developer_browser_testing.md#3-run-the-app-through-an-ssh-tunnel)
+for workstation health checks, alternate-port commands and tunnel troubleshooting.
+For remote manual testing, prefer `web-server`; `-d chrome` opens a browser on
+the machine running Flutter. Browser automation requires Chrome/ChromeDriver on
+the automation host and must be reported separately from manual tunnel testing.
 
-During development, Supabase runs locally using Docker (via the Supabase CLI). In production, the application connects directly to the hosted Supabase cloud service.
-- **Syncing Data (Prod to Dev)**: Use the Supabase CLI and database tools to pull/synchronize production database data down to the local development environment for testing and debugging.
-- **Syncing Schema (Dev to Prod)**: Use the Supabase CLI to deploy and push local database schema updates/migrations from development to production.
+### Development commands (on the server)
 
 ```bash
-supabase start                     # Start Supabase local emulator (runs via Docker)
-supabase stop                      # Stop Supabase emulator
-supabase db reset                  # Reset local database and run migrations
-supabase db pull                   # Pull database schema/changes from remote project
-supabase db push                   # Deploy local migrations to remote (production) DB
+# backend: run API and PostgreSQL in Docker
+test -f .env || cp .env.example .env
+docker compose -p pxmindflow up --build -d
+docker compose -p pxmindflow logs -f api
+docker compose -p pxmindflow exec api alembic upgrade head
+scripts/test_backend.sh  # isolated database; never run pytest against development data
+# Flutter: run on selected platform, separately from Docker
+cd frontend
+flutter pub get
+flutter analyze
+flutter test
+flutter run -d web-server --web-hostname 127.0.0.1 --web-port 8080 \
+  --dart-define=API_URL=http://localhost:8000/api/v1
+# flutter run -d windows | macos | linux | android | ios (on supported host)
 ```
 
----
+Use a project-specific Compose project name, keep bind mounts inside the repository, and prefer localhost-only published ports. Avoid `docker compose down -v` unless the developer explicitly authorizes data loss. Do not copy production user data into developer environments.
 
-## 5. Coding Standards
+## 9. Delivery order
 
-**Python:** `snake_case` files/vars/functions · `PascalCase` classes · `UPPER_SNAKE_CASE` constants
-**Go:** `camelCase` for private packages/functions/fields · `PascalCase` for exported types/methods · short/lowercase single-word package names
-**Dart:** `snake_case.dart` files · `PascalCase` classes · `camelCase` variables/methods
-**SQL/Postgres:** `snake_case` for all table, column, trigger, and index names · Singular table names
-**Flutter libs:** Riverpod v2 · GoRouter · Dio (with auth + error interceptors) · `flutter_localizations` (en, vi)
-**Python libs:** FastAPI (async) · SQLAlchemy 2.x async · Pydantic v2 · python-jose · Celery + Redis
-**Go libs:** gin/chi/fiber (router) · sqlx or GORM · pgx (driver)
+1. Repository audit, architecture and UI design docs, Docker/PostgreSQL, Flutter shell/theme, SQLite/Drift web+native support, auth and account isolation.
 
-**API conventions:**
-- Base URL: `/api/v1/` or Supabase REST endpoints · Auth: `Authorization: Bearer <token>` · Datetime: ISO 8601 UTC
-- Success: `{ "success": true, "data": {}, "error": null, "meta": {} }`
-- Error: `{ "success": false, "data": null, "error": { "code": "...", "message": "..." } }`
+2. Task CRUD + lists/tags/subtasks + robust sync protocol and multi-device tests (**the foundation**).
 
----
+3. Eisenhower Matrix and Calendar (reuse task data, then recurrence/reminders).
 
-## 6. Feature Development Workflow
+4. Habits + check-in sync; Pomodoro + persisted session history.
 
-1. Create/update `docs/<module>/spec.md` with full specification
-2. Write database migrations (Alembic for Python, Goose/Golang-migrate for Go, or Supabase SQL migrations)
-3. Implement backend:
-   - **Python/FastAPI:** `models` → `schemas` → `repository` → `service` → `router`
-   - **Go:** `models` → `repository` → `service` → `handler`
-   - **Supabase:** Tables/schemas/constraints → RLS policies → Triggers/Functions → Edge Functions (if needed)
-4. Write backend tests (`tests/features/<module>/` or package `_test.go`)
-5. Implement Flutter: models → datasources → repositories → usecases → providers → UI
-6. Update `docs/shared/database.md` and `docs/<module>/spec.md` to reflect actual implementation
+5. Offline search, accessibility, responsive refinement, localization, packaging, platform smoke tests and performance validation.
+
+At the end of each phase, make the app run, test critical paths, and document unresolved issues before extending scope. Prefer correct sync and full cross-platform support to optional bells and whistles.
