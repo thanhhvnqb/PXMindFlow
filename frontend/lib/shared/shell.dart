@@ -1,13 +1,17 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+
 import '../app/providers.dart';
 import '../features/tasks/domain/item.dart';
+import '../features/tasks/domain/organization.dart';
+import '../features/tasks/presentation/organization_fields.dart';
 import '../features/tasks/presentation/task_controls.dart';
 import '../features/tasks/presentation/task_details.dart';
 import '../features/tasks/domain/task_query.dart';
@@ -60,6 +64,9 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
   bool selecting = false;
   final selectedTasks = <String>{};
   String? listId;
+  String? projectId, tagId;
+  bool includeArchived = false;
+  bool showArchivedTags = false;
   DateTime date = DateTime.now();
   Timer? ticker;
   bool finishing = false;
@@ -138,6 +145,7 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     Item? item,
     String kind = 'task',
     String initialTitle = '',
+    String? parentTaskId,
     String? initialDue,
     String? initialDueAt,
     int initialPriority = 0,
@@ -149,15 +157,24 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     var due = item?.dueDate ?? initialDue;
     var dueAt = item?.data['due_at'] as String? ?? initialDueAt;
     var priority = item?.data['priority'] as int? ?? initialPriority;
-    var project = item?.data['list_id'] as String? ?? listId;
-    final lists =
-        ref
-            .read(itemsProvider)
-            .asData
-            ?.value
-            .where((i) => i.kind == 'task_list')
-            .toList() ??
-        [];
+    final organizationDraft = <String, dynamic>{...?item?.data};
+    if (item == null && kind == 'project' && listId != null) {
+      organizationDraft['space_id'] = listId;
+    }
+    if (item == null && kind == 'task') {
+      organizationDraft.addAll({
+        'list_id': projectId == null ? listId : null,
+        'project_id': projectId,
+      });
+    }
+    if (parentTaskId != null) {
+      organizationDraft.addAll({
+        'parent_id': parentTaskId,
+        'list_id': null,
+        'project_id': null,
+      });
+    }
+    final all = ref.read(itemsProvider).asData?.value ?? <Item>[];
     final form = GlobalKey<FormState>();
     var saved = false;
     var saving = false;
@@ -167,7 +184,10 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
         builder: (context, update) => AlertDialog(
           title: Text(
             item == null
-                ? label('Create ${kind.replaceAll('_', ' ')}', 'Tạo mới')
+                ? label(
+                    'Create ${(kind == 'task_list' ? 'Space' : kind.replaceAll('_', ' '))}',
+                    'Tạo mới',
+                  )
                 : label('Edit', 'Chỉnh sửa'),
           ),
           content: SizedBox(
@@ -224,27 +244,6 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         ),
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue: lists.any((l) => l.id == project)
-                            ? project
-                            : null,
-                        decoration: InputDecoration(
-                          labelText: label('List', 'Danh sách'),
-                        ),
-                        items: [
-                          DropdownMenuItem(
-                            value: null,
-                            child: Text(label('Inbox', 'Hộp thư')),
-                          ),
-                          ...lists.map(
-                            (l) => DropdownMenuItem(
-                              value: l.id,
-                              child: Text(l.title),
-                            ),
-                          ),
-                        ],
-                        onChanged: (value) => project = value,
-                      ),
                       const SizedBox(height: 12),
                       SwitchListTile(
                         title: Text(label('Urgent', 'Khẩn cấp')),
@@ -257,6 +256,19 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         onChanged: (v) => update(() => important = v),
                       ),
                     ],
+                    if (['task', 'task_list', 'project', 'tag'].contains(kind))
+                      OrganizationFields(
+                        item: Item(
+                          item?.id ?? '',
+                          kind,
+                          item?.version ?? 0,
+                          organizationDraft,
+                        ),
+                        all: all,
+                        vietnamese: widget.vietnamese,
+                        onChanged: (patch) =>
+                            update(() => organizationDraft.addAll(patch)),
+                      ),
                   ],
                 ),
               ),
@@ -273,12 +285,11 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                 update(() => saving = true);
                 try {
                   await repo.save(kind, {
-                    ...?item?.data,
+                    ...LocalRepository.clean(organizationDraft),
                     'title': title.text.trim(),
                     if (kind == 'task') ...{
                       'notes': notes.text,
                       'priority': priority,
-                      'list_id': project,
                       'due_date': due,
                       'due_at': dueAt,
                       'completed': item?.completed ?? false,
@@ -320,6 +331,17 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     return saved;
   }
 
+  Future<void> archive(Item item) => repo.save(item.kind, {
+    ...LocalRepository.clean(item.data),
+    'archived_at': item.data['archived_at'] == null
+        ? DateTime.now().toUtc().toIso8601String()
+        : null,
+  }, id: item.id);
+
+  Future<void> addSubtask(Item parent) async {
+    await editor(kind: 'task', parentTaskId: parent.id);
+  }
+
   Future<void> openTaskDetails(Item item) => managedDialog<void>(
     context: context,
     builder: (dialogContext) => Dialog(
@@ -336,7 +358,9 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
             return TaskDetails(
               key: ValueKey(item.id),
               item: current,
-              lists: all.where((i) => i.kind == 'task_list').toList(),
+              lists: all,
+              onOpenTask: openTaskDetails,
+              onAddSubtask: () => addSubtask(item),
               vietnamese: widget.vietnamese,
               onSave: (patch) => repo.updateTasks([item.id], patch),
               onClose: () => Navigator.pop(dialogContext),
@@ -354,8 +378,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
         title: Text(label('Delete “${item.title}”?', 'Xóa “${item.title}”?')),
         content: Text(
           label(
-            'This deletion will sync to your devices.',
-            'Thao tác xóa sẽ đồng bộ với các thiết bị.',
+            'This deletion includes subtasks and will sync to your devices.',
+            'Thao tác xóa gồm công việc con và sẽ đồng bộ với các thiết bị.',
           ),
         ),
         actions: [
@@ -372,12 +396,14 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     );
     if (confirmed == true) {
       await perform(
-        () => repo.save(
-          item.kind,
-          LocalRepository.clean(item.data),
-          id: item.id,
-          delete: true,
-        ),
+        () => item.kind == 'task'
+            ? repo.updateTasks([item.id], {}, delete: true)
+            : repo.save(
+                item.kind,
+                LocalRepository.clean(item.data),
+                id: item.id,
+                delete: true,
+              ),
       );
     }
   }
@@ -394,8 +420,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
         ),
         content: Text(
           label(
-            'This deletion will sync to your devices.',
-            'Thao tác xóa sẽ đồng bộ với các thiết bị.',
+            'This deletion includes subtasks and will sync to your devices.',
+            'Thao tác xóa gồm công việc con và sẽ đồng bộ với các thiết bị.',
           ),
         ),
         actions: [
@@ -419,7 +445,16 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
   }
 
   Widget taskTile(Item item, {bool selectable = false}) => Card(
-    margin: const EdgeInsets.only(bottom: 1),
+    margin: EdgeInsets.only(
+      bottom: 1,
+      left:
+          Organization(ref.read(itemsProvider).asData?.value ?? <Item>[])
+              .ancestors(item)
+              .where((i) => i.kind == 'task')
+              .length
+              .clamp(0, 3) *
+          12.0,
+    ),
     elevation: 0,
     child: ListTile(
       dense: true,
@@ -447,7 +482,10 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
           decoration: item.completed ? TextDecoration.lineThrough : null,
         ),
       ),
-      subtitle: item.dueDate != null || item.notes.isNotEmpty
+      subtitle:
+          item.dueDate != null ||
+              item.notes.isNotEmpty ||
+              (item.data['tag_ids'] as List? ?? []).isNotEmpty
           ? Text(
               [
                 if (item.dueDate != null)
@@ -456,6 +494,10 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                           ? ''
                           : ', ${DateFormat('HH:mm').format(DateTime.parse(item.data['due_at'] as String).toLocal())}'),
                 if (item.notes.isNotEmpty) item.notes,
+                ...(item.data['tag_ids'] as List? ?? []).map(
+                  (id) =>
+                      '#${(ref.read(itemsProvider).asData?.value ?? <Item>[]).where((i) => i.kind == 'tag' && i.id == id).firstOrNull?.title ?? id}',
+                ),
               ].join(' · '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
@@ -531,18 +573,26 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
           onTap: () => setState(() {
             filter = view;
             listId = null;
+            projectId = null;
           }),
         ),
       ),
       const Divider(height: 32),
       ListTile(
         dense: true,
-        title: Text(label('All lists', 'Mọi danh sách')),
+        title: Text(label('All Spaces', 'Mọi không gian')),
         selected: listId == null,
-        onTap: () => setState(() => listId = null),
+        onTap: () => setState(() {
+          listId = null;
+          projectId = null;
+        }),
       ),
       ...all
-          .where((i) => i.kind == 'task_list')
+          .where(
+            (i) =>
+                i.kind == 'task_list' &&
+                (includeArchived || !Organization(all).archived(i)),
+          )
           .map(
             (i) => ListTile(
               dense: true,
@@ -555,21 +605,26 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
               selected: listId == i.id,
               onTap: () => setState(() {
                 listId = i.id;
+                projectId = null;
                 filter = 'All';
               }),
               trailing: PopupMenuButton<String>(
-                tooltip: label('List actions', 'Thao tác danh sách'),
+                tooltip: label('Space actions', 'Thao tác không gian'),
                 onSelected: (value) => value == 'edit'
                     ? editor(item: i, kind: 'task_list')
-                    : remove(i),
+                    : perform(() => archive(i)),
                 itemBuilder: (_) => [
                   PopupMenuItem(
                     value: 'edit',
                     child: Text(label('Edit', 'Chỉnh sửa')),
                   ),
                   PopupMenuItem(
-                    value: 'delete',
-                    child: Text(label('Delete', 'Xóa')),
+                    value: 'archive',
+                    child: Text(
+                      i.data['archived_at'] == null
+                          ? label('Archive', 'Lưu trữ')
+                          : label('Restore', 'Khôi phục'),
+                    ),
                   ),
                 ],
               ),
@@ -577,8 +632,81 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
           ),
       ListTile(
         leading: const Icon(Icons.add),
-        title: Text(label('New list', 'Danh sách mới')),
+        title: Text(label('New Space', 'Không gian mới')),
         onTap: () => editor(kind: 'task_list'),
+      ),
+      SwitchListTile(
+        title: Text(label('Include archived', 'Hiện mục lưu trữ')),
+        value: includeArchived,
+        onChanged: (v) => setState(() => includeArchived = v),
+      ),
+      ...all
+          .where(
+            (i) =>
+                i.kind == 'project' &&
+                (listId == null || i.data['space_id'] == listId) &&
+                (includeArchived || !Organization(all).archived(i)),
+          )
+          .map(
+            (i) => ListTile(
+              leading: const Icon(Icons.work_outline),
+              title: Text(i.title),
+              subtitle: Text(i.data['status'] as String? ?? 'active'),
+              selected: projectId == i.id,
+              onTap: () => setState(() {
+                projectId = i.id;
+                listId = null;
+                filter = 'All';
+              }),
+              trailing: IconButton(
+                icon: const Icon(Icons.more_horiz),
+                tooltip: label('Project details', 'Chi tiết dự án'),
+                onPressed: () => editor(item: i, kind: 'project'),
+              ),
+            ),
+          ),
+      ListTile(
+        leading: const Icon(Icons.add),
+        title: Text(label('New Project', 'Dự án mới')),
+        onTap: () => editor(kind: 'project'),
+      ),
+      const Divider(),
+      SwitchListTile(
+        title: Text(label('Show archived tags', 'Hiện nhãn lưu trữ')),
+        value: showArchivedTags,
+        onChanged: (v) => setState(() {
+          showArchivedTags = v;
+          tagId = null;
+        }),
+      ),
+      ListTile(
+        title: Text(label('All tags', 'Mọi nhãn')),
+        selected: tagId == null,
+        onTap: () => setState(() => tagId = null),
+      ),
+      ...all
+          .where(
+            (i) =>
+                i.kind == 'tag' &&
+                (showArchivedTags || i.data['archived_at'] == null),
+          )
+          .map(
+            (i) => ListTile(
+              leading: const Icon(Icons.tag),
+              title: Text(i.title),
+              selected: tagId == i.id,
+              onTap: () => setState(() => tagId = i.id),
+              trailing: IconButton(
+                icon: const Icon(Icons.more_horiz),
+                tooltip: label('Tag details', 'Chi tiết nhãn'),
+                onPressed: () => editor(item: i, kind: 'tag'),
+              ),
+            ),
+          ),
+      ListTile(
+        leading: const Icon(Icons.add),
+        title: Text(label('New Tag', 'Nhãn mới')),
+        onTap: () => editor(kind: 'tag'),
       ),
     ],
   );
@@ -609,8 +737,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         Builder(
                           builder: (context) => IconButton(
                             tooltip: label(
-                              'Lists and filters',
-                              'Danh sách và bộ lọc',
+                              'Spaces and filters',
+                              'Không gian và bộ lọc',
                             ),
                             icon: const Icon(Icons.menu),
                             onPressed: () => Scaffold.of(context).openDrawer(),
@@ -647,7 +775,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         'title': title,
                         'notes': '',
                         'priority': priority,
-                        'list_id': listId,
+                        'list_id': projectId == null ? listId : null,
+                        'project_id': projectId,
                         'due_date': due,
                         'due_at': dueAt,
                         'completed': false,
@@ -681,7 +810,9 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                   : TaskDetails(
                       key: ValueKey(active.id),
                       item: active,
-                      lists: all.where((i) => i.kind == 'task_list').toList(),
+                      lists: all,
+                      onOpenTask: openTaskDetails,
+                      onAddSubtask: () => addSubtask(active),
                       vietnamese: widget.vietnamese,
                       onSave: (patch) => repo.updateTasks([active.id], patch),
                       onClose: () => setState(() => activeTaskId = null),
@@ -737,6 +868,9 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     final tasks = TaskQuery(
       view: filter,
       listId: listId,
+      projectId: projectId,
+      tagId: tagId,
+      includeArchived: includeArchived,
       priority: priorityFilter,
       sort: taskSort,
     ).apply(all, DateTime.now());
@@ -875,6 +1009,7 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
               .where(
                 (i) =>
                     i.kind == 'task' &&
+                    !Organization(all).archived(i) &&
                     !i.completed &&
                     (i.data['is_urgent'] == true) == urgent &&
                     (i.data['is_important'] == true) == important,
@@ -1006,7 +1141,12 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
   Widget calendar(List<Item> all) {
     final key = DateFormat('yyyy-MM-dd').format(date);
     final tasks = all
-        .where((i) => i.kind == 'task' && i.dueDate == key)
+        .where(
+          (i) =>
+              i.kind == 'task' &&
+              !Organization(all).archived(i) &&
+              i.dueDate == key,
+        )
         .toList();
     return Column(
       children: [
@@ -1059,10 +1199,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
         const SizedBox(height: 24),
         Text(
           '${(remaining ~/ 60).toString().padLeft(2, '0')}:${(remaining % 60).toString().padLeft(2, '0')}',
-          style: Theme.of(context).textTheme.displayLarge?.copyWith(
-            fontWeight: FontWeight.w300,
-            fontSize: 80,
-          ),
+          style: Theme.of(context).textTheme.displayLarge
+              ?.copyWith(fontWeight: FontWeight.w300, fontSize: 80),
         ),
         const SizedBox(height: 16),
         Text(
@@ -1158,9 +1296,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                 onPressed: () => perform(
                   () => repo.save('focus_session', {
                     ...LocalRepository.clean(active.data),
-                    'elapsed_seconds': elapsed(
-                      active,
-                    ).clamp(0, active.data['duration_seconds']),
+                    'elapsed_seconds': elapsed(active)
+                        .clamp(0, active.data['duration_seconds']),
                     'state': 'finished',
                     'anchor': null,
                   }, id: active.id),
@@ -1198,7 +1335,19 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
 
   Widget searchPage(List<Item> all) {
     final resultState = ref.watch(searchProvider(search));
-    final results = resultState.asData?.value ?? <Item>[];
+    final organization = Organization(all);
+    final results = (resultState.asData?.value ?? <Item>[])
+        .where(
+          (i) =>
+              (includeArchived ||
+                  (i.kind == 'tag' && showArchivedTags) ||
+                  !organization.archived(i)) &&
+              (i.kind != 'tag' ||
+                  showArchivedTags ||
+                  i.data['archived_at'] == null) &&
+              (tagId == null || organization.tagSources(i).containsKey(tagId)),
+        )
+        .toList();
     return Column(
       children: [
         TextField(
@@ -1206,11 +1355,57 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
           decoration: InputDecoration(
             prefixIcon: const Icon(Icons.search),
             hintText: label(
-              'Search your tasks, lists and habits',
+              'Search tasks, Spaces, projects, tags and habits',
               'Tìm công việc, danh sách và thói quen',
             ),
           ),
           onChanged: (v) => setState(() => search = v),
+        ),
+        Wrap(
+          spacing: 12,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            FilterChip(
+              label: Text(label('Include archived', 'Hiện mục lưu trữ')),
+              selected: includeArchived,
+              onSelected: (v) => setState(() => includeArchived = v),
+            ),
+            FilterChip(
+              label: Text(label('Archived tags', 'Nhãn lưu trữ')),
+              selected: showArchivedTags,
+              onSelected: (v) => setState(() {
+                showArchivedTags = v;
+                tagId = null;
+              }),
+            ),
+            DropdownButton<String>(
+              value: all.any((i) => i.kind == 'tag' && i.id == tagId)
+                  ? tagId
+                  : null,
+              hint: Text(label('Filter by tag', 'Lọc theo nhãn')),
+              items: [
+                DropdownMenuItem(
+                  value: null,
+                  child: Text(label('All tags', 'Mọi nhãn')),
+                ),
+                ...all
+                    .where(
+                      (i) =>
+                          i.kind == 'tag' &&
+                          (showArchivedTags ||
+                              i.data['archived_at'] == null ||
+                              i.id == tagId),
+                    )
+                    .map(
+                      (i) => DropdownMenuItem(
+                        value: i.id,
+                        child: Text('#${i.title}'),
+                      ),
+                    ),
+              ],
+              onChanged: (v) => setState(() => tagId = v),
+            ),
+          ],
         ),
         const SizedBox(height: 24),
         if (results.isEmpty)
@@ -1224,7 +1419,15 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
               : Card(
                   child: ListTile(
                     title: Text(i.title),
-                    subtitle: Text(i.kind),
+                    subtitle: Text(
+                      i.kind == 'task_list'
+                          ? label('Space', 'Không gian')
+                          : i.kind == 'project'
+                          ? label('Project', 'Dự án')
+                          : i.kind == 'tag'
+                          ? label('Tag', 'Nhãn')
+                          : i.kind,
+                    ),
                     onTap: () => editor(item: i, kind: i.kind),
                   ),
                 ),
@@ -1257,6 +1460,13 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                             style: Theme.of(context).textTheme.titleMedium,
                           ),
                           Text(conflict.reason),
+                          if (LocalRepository.isValidationFailure(conflict))
+                            Text(
+                              label(
+                                'The API rejected these changes. Your local data is safe. For invalid_payload, update the API to match this app, then retry. Other validation errors may require editing the record.',
+                                'API từ chối thay đổi. Dữ liệu cục bộ vẫn được giữ. Với invalid_payload, cập nhật API rồi thử lại. Lỗi kiểm tra khác có thể cần chỉnh sửa bản ghi.',
+                              ),
+                            ),
                           ExpansionTile(
                             title: const Text('Review differences'),
                             children: [
@@ -1276,18 +1486,29 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                                   if (context.mounted) Navigator.pop(context);
                                   widget.sync();
                                 },
-                                child: const Text('Keep mine'),
+                                child: Text(
+                                  LocalRepository.isValidationFailure(conflict)
+                                      ? label(
+                                          'Retry my changes',
+                                          'Thử lại thay đổi',
+                                        )
+                                      : label('Keep mine', 'Giữ của tôi'),
+                                ),
                               ),
-                              TextButton(
-                                onPressed: () async {
-                                  await perform(
-                                    () => repo.resolve(conflict, mine: false),
-                                  );
-                                  if (context.mounted) Navigator.pop(context);
-                                  widget.sync();
-                                },
-                                child: const Text('Keep server'),
-                              ),
+                              if (!LocalRepository.isValidationFailure(
+                                    conflict,
+                                  ) ||
+                                  jsonDecode(conflict.remote) != null)
+                                TextButton(
+                                  onPressed: () async {
+                                    await perform(
+                                      () => repo.resolve(conflict, mine: false),
+                                    );
+                                    if (context.mounted) Navigator.pop(context);
+                                    widget.sync();
+                                  },
+                                  child: const Text('Keep server'),
+                                ),
                             ],
                           ),
                         ],
@@ -1419,9 +1640,9 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                                       isSelected: index == i,
                                       style: IconButton.styleFrom(
                                         backgroundColor: index == i
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.secondaryContainer
+                                            ? Theme.of(context)
+                                                  .colorScheme
+                                                  .secondaryContainer
                                             : null,
                                       ),
                                       onPressed: () =>

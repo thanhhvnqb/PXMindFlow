@@ -21,3 +21,9 @@ This increment supports date-only scheduling. Time, duration, notification remin
 Quick entry and the full editor share a date/time picker. Choosing a time creates optional `due_at` as a UTC ISO instant; the selected calendar date remains in `due_date`. OK commits staged values; Cancel discards them; Clear removes both, while Clear time preserves the date. Timed tasks display in the device timezone, including their date in task/calendar projections. Date-only tasks remain floating calendar dates. This schedules a due time; it does not schedule a notification.
 
 Selecting a task opens editable details immediately (side pane on wide task workspaces, dialog on compact layouts). Title, notes, completion, date/time, priority, list and matrix attributes save locally without an Edit or Save button. Writes serialize per editor and merge only changed fields against the current SQLite row transactionally, preserving other edits and outbox atomicity. Invalid blank titles are shown but never persisted. Save errors retain draft text and expose Retry. No new dependencies or database table migrations are needed for the JSON-envelope field.
+
+## Space → Project → Task → Subtask
+
+The List UI is replaced by Space. Projects and flat tags, direct tag assignment,
+effective-tag task filters, inherited-tag source details, archive controls and
+subtask creation use the canonical local records. See [organization](organization.md).

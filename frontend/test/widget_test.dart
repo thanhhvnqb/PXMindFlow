@@ -50,7 +50,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byTooltip('MindFlow'), findsOneWidget);
     expect(find.byType(NavigationBar), findsNothing);
-    await tester.tap(find.byTooltip('Lists and filters'));
+    await tester.tap(find.byTooltip('Spaces and filters'));
     await tester.pumpAndSettle();
     expect(find.text('My tasks'), findsOneWidget);
     Navigator.of(tester.element(find.text('My tasks'))).pop();

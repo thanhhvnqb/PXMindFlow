@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+
 import 'web_persistence.dart';
 part 'database.g.dart';
 
@@ -60,17 +61,33 @@ class AppDatabase extends _$AppDatabase {
       );
   AppDatabase.testing(super.executor);
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
   @override
   MigrationStrategy get migration => MigrationStrategy(
     onCreate: (m) async {
       await m.createAll();
       await _searchIndex();
+      await _organizationIndexes();
     },
     onUpgrade: (m, from, to) async {
       if (from < 2) await _searchIndex();
+      if (from < 3) await _organizationIndexes();
     },
   );
+  Future<void> _organizationIndexes() async {
+    for (final key in [
+      'list_id',
+      'space_id',
+      'project_id',
+      'parent_id',
+      'archived_at',
+    ]) {
+      await customStatement(
+        "CREATE INDEX IF NOT EXISTS records_$key ON records(kind, json_extract(payload, '\$.$key'))",
+      );
+    }
+  }
+
   Future<void> _searchIndex() async {
     try {
       await customStatement(

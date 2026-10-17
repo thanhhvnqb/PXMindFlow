@@ -21,14 +21,59 @@ class Named(Payload):
         return value
 
 
-class TaskList(Named):
+class Tagged(Named):
+    tag_ids: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("tag_ids")
+    @classmethod
+    def tags(cls, values):
+        for value in values:
+            UUID(value)
+        if len(values) != len(set(values)):
+            raise ValueError("duplicate tag")
+        return values
+
+
+class Archivable(Tagged):
+    archived_at: str | None = None
+
+    @field_validator("archived_at")
+    @classmethod
+    def archive_instant(cls, value):
+        if value is not None:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None or parsed.utcoffset().total_seconds() != 0:
+                raise ValueError("archived_at must be UTC")
+        return value
+
+
+class Tag(Named):
+    archived_at: str | None = None
+    archive_instant = field_validator("archived_at")(
+        Archivable.archive_instant.__func__
+    )
+
+
+class Project(Archivable):
+    space_id: str
+    status: Literal["active", "on_hold", "completed", "cancelled"] = "active"
+
+    @field_validator("space_id")
+    @classmethod
+    def space_identifier(cls, value):
+        UUID(value)
+        return value
+
+
+class TaskList(Archivable):
     color: str | None = Field(default=None, max_length=30)
 
 
-class Task(Named):
+class Task(Tagged):
     notes: str = Field(default="", max_length=20000)
     list_id: str | None = None
     parent_id: str | None = None
+    project_id: str | None = None
     priority: int = Field(default=0, ge=0, le=3)
     due_date: str | None = None
     due_at: str | None = None
@@ -46,7 +91,7 @@ class Task(Named):
                 raise ValueError("due_at must be a UTC instant")
         return value
 
-    @field_validator("list_id", "parent_id")
+    @field_validator("list_id", "parent_id", "project_id")
     @classmethod
     def identifier(cls, value):
         if value is not None:
@@ -107,6 +152,8 @@ class Focus(Named):
 
 SCHEMAS = {
     "task_list": TaskList,
+    "project": Project,
+    "tag": Tag,
     "task": Task,
     "habit": Habit,
     "habit_checkin": Checkin,

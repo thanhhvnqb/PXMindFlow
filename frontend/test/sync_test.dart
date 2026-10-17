@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -16,6 +17,7 @@ class Server implements HttpClientAdapter {
   bool loseAck = false;
   bool badPage = false;
   bool authFailure = false;
+  bool rejectPayload = false;
   @override
   Future<ResponseBody> fetch(
     RequestOptions options,
@@ -38,7 +40,13 @@ class Server implements HttpClientAdapter {
       var result = operations[id];
       if (result == null) {
         final current = records[op['entity_id']];
-        if (op['base_version'] != (current?['version'] ?? 0)) {
+        if (rejectPayload) {
+          result = {
+            'operation_id': id,
+            'status': 'validation_failure',
+            'code': 'invalid_payload',
+          };
+        } else if (op['base_version'] != (current?['version'] ?? 0)) {
           result = {
             'operation_id': id,
             'status': 'conflict',
@@ -118,6 +126,112 @@ void main() {
     worker.dispose();
     await db.close();
   });
+  test(
+    'organization dependency order and lost ACK preserve placement edits',
+    () async {
+      await repo.save('tag', {'title': 'QBU'}, id: 'tag');
+      await repo.save('task_list', {
+        'title': 'Teaching',
+        'tag_ids': ['tag'],
+      }, id: 'space');
+      await repo.save('project', {
+        'title': 'Semester',
+        'space_id': 'space',
+      }, id: 'project');
+      await repo.save('task', {
+        'title': 'Prepare',
+        'project_id': 'project',
+      }, id: 'task');
+      await repo.save('task', {
+        'title': 'Slides',
+        'parent_id': 'task',
+      }, id: 'child');
+      server.loseAck = true;
+      await worker.run();
+      await repo.updateTasks(
+        ['task'],
+        {'project_id': null, 'list_id': 'space'},
+      );
+      await worker.run();
+      expect(status, 'synced');
+      expect(await db.select(db.outbox).get(), isEmpty);
+      expect(server.requests.map((r) => r['entity_type']), [
+        'tag',
+        'tag',
+        'task_list',
+        'project',
+        'task',
+        'task',
+        'task',
+      ]);
+      expect(server.records['task']!['payload']['list_id'], 'space');
+      expect(server.records['task']!['version'], 2);
+      expect(server.records['child']!['payload']['parent_id'], 'task');
+    },
+  );
+  test('retry rejected update preserves version and uses fresh operation after API upgrade', () async {
+    await repo.save('task', {'title': 'Original'}, id: 'one');
+    await worker.run();
+    await repo.updateTasks(
+      ['one'],
+      {'title': 'Keep this edit', 'project_id': null},
+    );
+    server.rejectPayload = true;
+    await worker.run();
+    expect(status, 'attention');
+    final rejection = (await db.select(db.conflicts).get()).single;
+    expect(rejection.reason, 'validation_failure:invalid_payload');
+    final rejectedOp = (await db.select(db.outbox).get()).single.operationId;
+    server.rejectPayload = false;
+    await repo.resolve(rejection, mine: true);
+    final retry = (await db.select(db.outbox).get()).single;
+    expect(retry.operation, 'update');
+    expect(retry.baseVersion, 1);
+    expect(retry.operationId, isNot(rejectedOp));
+    expect(
+      jsonDecode((await repo.get('task', 'one'))!.payload)['title'],
+      'Keep this edit',
+    );
+    await worker.run();
+    expect(status, 'synced');
+    expect(server.records['one']!['version'], 2);
+    expect(server.records['one']!['payload']['title'], 'Keep this edit');
+    expect(await db.select(db.outbox).get(), isEmpty);
+    expect(await db.select(db.conflicts).get(), isEmpty);
+  });
+  test(
+    'legacy invalid_payload without snapshot never discards local data',
+    () async {
+      await repo.save('task', {'title': 'Original'}, id: 'one');
+      await worker.run();
+      await repo.updateTasks(['one'], {'title': 'Latest local edit'});
+      await repo.conflict('task', 'one', null, 'invalid_payload');
+      final rejection = (await db.select(db.conflicts).get()).single;
+      await expectLater(repo.resolve(rejection, mine: false), throwsStateError);
+      expect(await db.select(db.outbox).get(), hasLength(1));
+      expect((await repo.get('task', 'one'))!.version, 1);
+      await repo.resolve(rejection, mine: true);
+      await worker.run();
+      expect(status, 'synced');
+      expect(server.records['one']!['payload']['title'], 'Latest local edit');
+    },
+  );
+  test(
+    'retry rejected new task remains a create and preserves its ID',
+    () async {
+      server.rejectPayload = true;
+      await repo.save('task', {'title': 'Never uploaded'}, id: 'new');
+      await worker.run();
+      final rejected = (await db.select(db.conflicts).get()).single;
+      server.rejectPayload = false;
+      await repo.resolve(rejected, mine: true);
+      expect((await db.select(db.outbox).get()).single.operation, 'create');
+      expect((await repo.get('task', 'new'))!.version, 0);
+      await worker.run();
+      expect(status, 'synced');
+      expect(server.records['new']!['payload']['title'], 'Never uploaded');
+    },
+  );
   test('atomic write rollback retains neither domain nor outbox', () async {
     try {
       await db.transaction(() async {
@@ -144,24 +258,21 @@ void main() {
       );
     },
   );
-  test(
-    'lost ACK then later edit replays frozen operation without overwriting edit',
-    () async {
-      await repo.save('task', {'title': 'First'}, id: 'one');
-      server.loseAck = true;
-      await worker.run();
-      expect(status, 'offline');
-      await repo.save('task', {'title': 'Later'}, id: 'one');
-      await worker.run();
-      expect(status, 'synced');
-      expect(server.requests[0], server.requests[1]);
-      expect(
-        jsonDecode((await repo.get('task', 'one'))!.payload)['title'],
-        'Later',
-      );
-      expect(server.records['one']!['version'], 2);
-    },
-  );
+  test('lost ACK then later edit replays frozen operation without overwriting edit', () async {
+    await repo.save('task', {'title': 'First'}, id: 'one');
+    server.loseAck = true;
+    await worker.run();
+    expect(status, 'offline');
+    await repo.save('task', {'title': 'Later'}, id: 'one');
+    await worker.run();
+    expect(status, 'synced');
+    expect(server.requests[0], server.requests[1]);
+    expect(
+      jsonDecode((await repo.get('task', 'one'))!.payload)['title'],
+      'Later',
+    );
+    expect(server.records['one']!['version'], 2);
+  });
   test(
     'two devices retain conflicts and keep mine against remote version',
     () async {
@@ -273,6 +384,7 @@ void main() {
     expect(await repo.search('Changed').first, isEmpty);
   });
   test('two check-ins on one calendar day share the same identity', () async {
+    await repo.save('habit', {'title': 'Read'}, id: 'habit');
     final payload = {
       'habit_id': 'habit',
       'local_date': '2026-10-13',
@@ -281,7 +393,10 @@ void main() {
     };
     await repo.save('habit_checkin', payload);
     await repo.save('habit_checkin', payload);
-    expect(await db.select(db.records).get(), hasLength(1));
+    expect(
+      (await repo.watch().first).where((i) => i.kind == 'habit_checkin'),
+      hasLength(1),
+    );
   });
   test(
     'keep server explicitly clears pending conflict without a new write',
@@ -309,9 +424,8 @@ void main() {
     final directory = await Directory.systemTemp.createTemp('mindflow_test');
     final file = File('${directory.path}/store.sqlite');
     var disk = AppDatabase.testing(NativeDatabase(file));
-    await LocalRepository(
-      disk,
-    ).save('task', {'title': 'Offline restart'}, id: 'restart');
+    await LocalRepository(disk)
+        .save('task', {'title': 'Offline restart'}, id: 'restart');
     await disk.close();
     disk = AppDatabase.testing(NativeDatabase(file));
     expect((await LocalRepository(disk).get('task', 'restart'))!.version, 0);

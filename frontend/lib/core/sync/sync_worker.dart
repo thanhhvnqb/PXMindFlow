@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
+
 import 'package:dio/dio.dart';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
+
 import '../../features/tasks/data/local_repository.dart';
 import '../db/database.dart';
 
@@ -99,7 +101,9 @@ class SyncWorker {
               op.kind,
               op.entityId,
               result['record'],
-              result['code'] ?? 'version_conflict',
+              result['status'] == 'validation_failure'
+                  ? 'validation_failure:${result['code'] ?? 'invalid_payload'}'
+                  : result['code'] ?? 'version_conflict',
             );
           }
         });
