@@ -155,3 +155,61 @@ optional HTTP test skipped); 14 isolated PostgreSQL tests and Alembic schema
 check passed; Ruff and diff checks passed. Live API health returned ok, live
 payload validation accepted project_id/parent_id/due_at, and Alembic reported
 0003 (head). Browser interaction remains to be confirmed on the workstation.
+
+## Markdown notes verification (2026-10-17)
+
+`flutter analyze` passed. The Flutter suite passed (40 tests, one environment-gated
+skip), and the added offline notes repository test passed separately. Formatting
+selection/preview is covered by a widget test. `scripts/test_backend.sh` passed
+15 tests plus `alembic upgrade head` and `alembic check` in an isolated database;
+the notes case covers owner validation, multiple notes, lost ACK, edit/delete
+conflict and tombstones. Existing general sync recovery tests remain applicable;
+this does not claim complete coverage of every MVP recovery scenario. Manual
+workstation tunnel testing and native platform builds were not performed.
+
+`flutter build web` also passed, including its Wasm compatibility dry run. A build
+is not a browser persistence or workstation tunnel smoke test.
+
+Rendered-note refinement: widget coverage verifies rendered-first display,
+selection-triggered formatting and source/view switching. Projection tests check
+mapping of hidden Markdown delimiters, links and selections across paragraphs.
+The task detail persistence flow now explicitly opens Markdown code before typing.
+
+For this refinement, `flutter analyze` passed and the complete Flutter test suite
+passed with 42 tests and one environment-gated skip. Backend persistence contracts
+were unchanged. Native builds and manual browser/tunnel interaction were not run.
+The Web release build and Wasm compatibility dry run also passed.
+
+Floating menu regression: the test now uses a mouse pointer, hovers until tooltips
+settle, applies Bold with mouse down/up, opens the text-style dropdown and applies
+Heading 2. It asserts the saved source and rendered text. This reproduced the
+RenderFollowerLayer paint-transform assertion before the overlay fix and passes
+with the independent root overlay.
+
+Hover fix verification: `flutter analyze` passed; the full Flutter suite passed
+42 tests with one environment-gated skip. The hover/click/dropdown regression
+also passed using the Linux desktop theme. Manual workstation browser/tunnel
+verification and native builds were not performed.
+The Web release build (including Wasm dry run) passed for this fix.
+
+Checklist/style/color refinement: analysis passed, the full suite passed 44 tests
+with one environment-gated skip, and all five targeted editor tests passed after
+adding the multiline-color regression. Tests exercise current-style indication,
+checkbox check/uncheck and persistence, absence of clipboard menu entries, color
+selection, nested bold rendering and multiline block preservation. Web release
+build and Wasm dry run passed. No manual workstation browser/tunnel test or native
+platform build was performed. No backend contracts or dependencies changed.
+
+Rendered editing and highlight refinement: `flutter analyze` and the full Flutter
+suite passed (46 tests, one environment-gated skip). Editor tests cover direct
+rendered edits retaining Markdown, composing Vietnamese text, deleting within
+formatting, yellow highlight, collapsed-selection menu dismissal, hover and style
+popup actions, and editing/toggling checklist rows. Old color HTML is tested as
+literal text. No backend contracts or dependencies changed. Native builds and
+manual workstation browser/tunnel interaction were not performed.
+
+Additional rendered-formatting regression coverage passed: partial highlight
+removal and multiline highlight preserve balanced marks and block prefixes.
+The final full suite passed 47 tests with one environment-gated skip; all seven
+editor tests also passed after adding source-mode outside-click dismissal.
+The rendered-editing Web release build and Wasm compatibility dry run passed.

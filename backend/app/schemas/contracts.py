@@ -26,7 +26,14 @@ class Mutation(BaseModel):
     operation_id: UUID
     device_id: UUID
     entity_type: Literal[
-        "task_list", "project", "tag", "task", "habit", "habit_checkin", "focus_session"
+        "task_list",
+        "project",
+        "tag",
+        "note",
+        "task",
+        "habit",
+        "habit_checkin",
+        "focus_session",
     ]
     entity_id: UUID
     operation: Literal["create", "update", "delete"]

@@ -339,3 +339,48 @@ async def test_invalid_update_returns_server_snapshot_and_fresh_retry_succeeds(c
     result = (await push(client, token, retry))[0]
     assert result["status"] == "applied"
     assert result["record"]["version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_notes_ownership_context_conflicts_and_delete(client):
+    user = await account(client)
+    other = await account(client)
+    token = user["access_token"]
+    space = mutation(kind="task_list")
+    project = mutation(kind="project", space_id=space["entity_id"])
+    assert all(
+        r["status"] == "applied" for r in await push(client, token, space, project)
+    )
+    for placement in (
+        {"list_id": space["entity_id"]},
+        {"project_id": project["entity_id"]},
+    ):
+        note = mutation(kind="note", notes="# Heading\n**Bold**", **placement)
+        first = (await push(client, token, note))[0]
+        assert first["status"] == "applied"
+        assert (await push(client, token, note))[0]["duplicate"]
+        assert (
+            await push(
+                client, other["access_token"], mutation(kind="note", **placement)
+            )
+        )[0]["status"] == "validation_failure"
+        edit = mutation(
+            note["entity_id"], 1, "update", kind="note", notes="Changed", **placement
+        )
+        assert (await push(client, token, edit))[0]["status"] == "applied"
+        stale = mutation(note["entity_id"], 1, "delete", kind="note", **placement)
+        assert (await push(client, token, stale))[0]["status"] == "conflict"
+        delete = mutation(note["entity_id"], 2, "delete", kind="note", **placement)
+        assert (await push(client, token, delete))[0]["status"] == "applied"
+    assert (await push(client, token, mutation(kind="note")))[0][
+        "status"
+    ] == "validation_failure"
+    assert (
+        await push(
+            client,
+            token,
+            mutation(
+                kind="note", list_id=space["entity_id"], project_id=project["entity_id"]
+            ),
+        )
+    )[0]["status"] == "validation_failure"

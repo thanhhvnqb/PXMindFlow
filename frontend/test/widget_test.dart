@@ -70,6 +70,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Task details'), findsOneWidget);
     expect(find.byKey(const ValueKey('task-detail-title')), findsOneWidget);
+    await tester.tap(find.text('Markdown code'));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('task-detail-notes')),
       'Saved without an edit button',
@@ -146,9 +148,8 @@ void main() {
         child: MaterialApp.router(
           routerConfig: router,
           builder: (context, child) => MediaQuery(
-            data: MediaQuery.of(
-              context,
-            ).copyWith(textScaler: const TextScaler.linear(1.3)),
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: const TextScaler.linear(1.3)),
             child: child!,
           ),
         ),

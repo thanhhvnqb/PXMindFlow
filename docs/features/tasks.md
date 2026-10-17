@@ -27,3 +27,6 @@ Selecting a task opens editable details immediately (side pane on wide task work
 The List UI is replaced by Space. Projects and flat tags, direct tag assignment,
 effective-tag task filters, inherited-tag source details, archive controls and
 subtask creation use the canonical local records. See [organization](organization.md).
+
+Task notes now share the [Markdown editor](notes.md) with independent Space and
+project notes. Original source text remains the persisted and synchronized value.

@@ -47,6 +47,11 @@ async def validate(
         tag = await store.record(db, uid, "tag", tag_id)
         if not tag or tag.payload.get("deleted_at"):
             return "invalid_reference"
+    if (
+        kind == "note"
+        and sum(bool(payload.get(k)) for k in ("list_id", "project_id")) != 1
+    ):
+        return "invalid_note_context"
     if kind == "task":
         if (
             sum(bool(payload.get(k)) for k in ("list_id", "project_id", "parent_id"))
