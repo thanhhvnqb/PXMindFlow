@@ -183,7 +183,7 @@ The scaffold exists. Use the [browser-first developer runbook](docs/developer_br
 
 ### Requirements
 
-- Flutter stable + Dart, with the relevant platform toolchains installed (`flutter doctor`).
+- Flutter 3.47.7 stable (includes Dart 3.13.5), with the relevant platform toolchains installed (`flutter doctor`).
 - Docker Engine / Docker Desktop and Docker Compose for the backend.
 - A browser for the Web target; compatible desktop/mobile SDKs as applicable.
 - macOS with Xcode to build iOS and macOS targets; Windows and Linux builds require their respective toolchains.

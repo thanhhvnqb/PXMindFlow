@@ -1,5 +1,13 @@
 # Verification
 
+## Stable SDK alignment, 2026-10-17
+
+- Google release feeds confirm Flutter 3.47.7 stable and Dart 3.13.5 are the newest stable releases. The host already has this exact Flutter revision and bundled Dart; no shared SDK installation changes were needed.
+- Updated application SDK minimums, both CI SDK pins (including all six platform build jobs), README and browser prerequisites. Retained pre-existing lockfile package changes; dependency resolution only raised the lockfile SDK minimums.
+- `flutter pub get` succeeded; `flutter analyze` found no issues; `flutter test` passed 26 tests, with the external HTTP test skipped without `TEST_API_URL`. Drift emitted multiple-database debug warnings during sync tests.
+- `flutter build web --dart-define=API_URL=http://localhost:8000/api/v1` passed, including the WASM compatibility dry run.
+- `flutter doctor` confirms the Android toolchain is available; Chrome and Linux build tools are missing. Native builds (Android, iOS, Windows, macOS, Linux), platform integration smoke tests, workstation browser/tunnel and hosted CI were not run. Backend and migrations were unchanged and their checks were not rerun for this SDK-only change.
+
 ## Account provider scope repair, 2026-10-15
 
 - Reproduced the screenshot's generic storage error in an app-level widget test with a task saved before login. The underlying exception was `Bad state: Account repository required`: dependent providers resolved from the root container rather than the nested account override.

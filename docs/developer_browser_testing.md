@@ -6,7 +6,7 @@ For the current remote-server workflow, use the [SSH tunnel instructions](../REA
 
 ## 1. Tools
 
-- Flutter 3.44.1 / Dart 3.12.1 (the CI versions; `pubspec.yaml` requires Dart ^3.12.1).
+- Flutter 3.47.7 / Dart 3.13.5 (the CI versions; `pubspec.yaml` requires Dart ^3.13.5 and Flutter >=3.47.7).
 - Docker Engine/Desktop and Compose v2; Python 3 for the backend test script.
 - Chrome, plus a compatible ChromeDriver version for browser integration tests.
 
