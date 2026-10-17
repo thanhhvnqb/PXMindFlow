@@ -14,6 +14,7 @@ import '../features/tasks/domain/organization.dart';
 import '../features/tasks/presentation/organization_fields.dart';
 import '../features/tasks/presentation/task_controls.dart';
 import '../features/tasks/presentation/task_details.dart';
+import '../features/tasks/presentation/markdown_editor.dart';
 import '../features/tasks/domain/task_query.dart';
 import '../features/tasks/data/local_repository.dart';
 
@@ -161,7 +162,7 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     if (item == null && kind == 'project' && listId != null) {
       organizationDraft['space_id'] = listId;
     }
-    if (item == null && kind == 'task') {
+    if (item == null && (kind == 'task' || kind == 'note')) {
       organizationDraft.addAll({
         'list_id': projectId == null ? listId : null,
         'project_id': projectId,
@@ -233,18 +234,12 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                           ? label('Add a title', 'Nhập tiêu đề')
                           : null,
                     ),
-                    if (kind == 'task') ...[
-                      const SizedBox(height: 12),
-                      TextField(
+                    if (kind == 'task' || kind == 'note')
+                      MarkdownEditor(
                         controller: notes,
-                        minLines: 2,
-                        maxLines: 5,
-                        decoration: InputDecoration(
-                          labelText: label('Notes', 'Ghi chú'),
-                        ),
+                        vietnamese: widget.vietnamese,
                       ),
-                      const SizedBox(height: 12),
-                      const SizedBox(height: 12),
+                    if (kind == 'task') ...[
                       SwitchListTile(
                         title: Text(label('Urgent', 'Khẩn cấp')),
                         value: urgent,
@@ -287,8 +282,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                   await repo.save(kind, {
                     ...LocalRepository.clean(organizationDraft),
                     'title': title.text.trim(),
+                    if (kind == 'task' || kind == 'note') 'notes': notes.text,
                     if (kind == 'task') ...{
-                      'notes': notes.text,
                       'priority': priority,
                       'due_date': due,
                       'due_at': dueAt,
@@ -329,6 +324,49 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     title.dispose();
     notes.dispose();
     return saved;
+  }
+
+  Future<void> deleteNote(Item note) async {
+    final confirmed = await managedDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(label('Delete note?', 'Xóa ghi chú?')),
+        content: Text(note.title),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(label('Cancel', 'Hủy')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(label('Delete', 'Xóa')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      try {
+        await repo.save(
+          'note',
+          LocalRepository.clean(note.data),
+          id: note.id,
+          delete: true,
+        );
+      } catch (_) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                label(
+                  'Could not delete. Try again.',
+                  'Không thể xóa. Hãy thử lại.',
+                ),
+              ),
+            ),
+          );
+        }
+      }
+    }
   }
 
   Future<void> archive(Item item) => repo.save(item.kind, {
@@ -493,7 +531,11 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                       (item.data['due_at'] == null
                           ? ''
                           : ', ${DateFormat('HH:mm').format(DateTime.parse(item.data['due_at'] as String).toLocal())}'),
-                if (item.notes.isNotEmpty) item.notes,
+                if (item.notes.isNotEmpty)
+                  MarkdownProjection(
+                    item.notes,
+                    Theme.of(context).textTheme,
+                  ).text,
                 ...(item.data['tag_ids'] as List? ?? []).map(
                   (id) =>
                       '#${(ref.read(itemsProvider).asData?.value ?? <Item>[]).where((i) => i.kind == 'tag' && i.id == id).firstOrNull?.title ?? id}',
@@ -785,6 +827,46 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                       });
                     },
                   ),
+                  if (listId != null || projectId != null) ...[
+                    Row(
+                      children: [
+                        Expanded(child: Text(label('Notes', 'Ghi chú'))),
+                        TextButton.icon(
+                          onPressed: () => editor(kind: 'note'),
+                          icon: const Icon(Icons.note_add_outlined),
+                          label: Text(label('Add note', 'Thêm ghi chú')),
+                        ),
+                      ],
+                    ),
+                    for (final note in all.where(
+                      (i) =>
+                          i.kind == 'note' &&
+                          (includeArchived || !Organization(all).archived(i)) &&
+                          (projectId != null
+                              ? i.data['project_id'] == projectId
+                              : i.data['list_id'] == listId),
+                    ))
+                      Card(
+                        child: ListTile(
+                          leading: const Icon(Icons.description_outlined),
+                          title: Text(note.title),
+                          subtitle: Text(
+                            MarkdownProjection(
+                              note.notes,
+                              Theme.of(context).textTheme,
+                            ).text,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          onTap: () => editor(item: note, kind: 'note'),
+                          trailing: IconButton(
+                            tooltip: label('Delete note', 'Xóa ghi chú'),
+                            icon: const Icon(Icons.delete_outline),
+                            onPressed: () => deleteNote(note),
+                          ),
+                        ),
+                      ),
+                  ],
                   tasks(all),
                 ],
               ),

@@ -17,3 +17,7 @@ Tasks optionally carry `due_at`, a UTC ISO timestamp validated by the API. Null/
 Organization v3 / server 0003 adds non-destructive reference indexes. `task_list`
 now means Space; legacy IDs and list_id references remain stable. See
 [organization](features/organization.md) for canonical placement, tags and archive.
+
+Independent `note` envelopes reference exactly one Space (`list_id`) or project
+(`project_id`); the existing reference indexes and transactional validation apply.
+See [Markdown notes](features/notes.md). No schema version change is required.

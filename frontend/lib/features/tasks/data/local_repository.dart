@@ -30,6 +30,7 @@ class LocalRepository {
                 'project',
                 'tag',
                 'habit',
+                'note',
               ].contains(i.kind),
             )
             .toList(),
@@ -43,8 +44,8 @@ class LocalRepository {
         .map((word) => '"${word.replaceAll('"', '""')}"*')
         .join(' AND ');
     final sql = fts == 'true'
-        ? "SELECT r.* FROM records r JOIN record_fts f ON r.id = f.id AND r.kind = f.kind WHERE record_fts MATCH ? AND r.kind IN ('task', 'task_list', 'project', 'tag', 'habit') AND json_extract(r.payload, '\$.deleted_at') IS NULL ORDER BY rank LIMIT 200"
-        : "SELECT * FROM records WHERE kind IN ('task', 'task_list', 'project', 'tag', 'habit') AND json_extract(payload, '\$.deleted_at') IS NULL AND (instr(lower(json_extract(payload, '\$.title')), lower(?)) > 0 OR instr(lower(coalesce(json_extract(payload, '\$.notes'), '')), lower(?)) > 0) LIMIT 200";
+        ? "SELECT r.* FROM records r JOIN record_fts f ON r.id = f.id AND r.kind = f.kind WHERE record_fts MATCH ? AND r.kind IN ('task', 'task_list', 'project', 'tag', 'habit', 'note') AND json_extract(r.payload, '\$.deleted_at') IS NULL ORDER BY rank LIMIT 200"
+        : "SELECT * FROM records WHERE kind IN ('task', 'task_list', 'project', 'tag', 'habit', 'note') AND json_extract(payload, '\$.deleted_at') IS NULL AND (instr(lower(json_extract(payload, '\$.title')), lower(?)) > 0 OR instr(lower(coalesce(json_extract(payload, '\$.notes'), '')), lower(?)) > 0) LIMIT 200";
     yield* db
         .customSelect(
           sql,

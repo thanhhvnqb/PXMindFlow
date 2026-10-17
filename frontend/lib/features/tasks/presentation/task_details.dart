@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../domain/item.dart';
 import 'task_controls.dart';
+import 'markdown_editor.dart';
 import 'organization_fields.dart';
 
 /// Each patch is merged with the latest SQLite row by the repository.
@@ -132,18 +133,10 @@ class _TaskDetailsState extends State<TaskDetails> {
             }
           },
         ),
-        TextField(
+        MarkdownEditor(
           key: const ValueKey('task-detail-notes'),
           controller: notes,
-          minLines: 5,
-          maxLines: null,
-          maxLength: 20000,
-          decoration: InputDecoration(
-            labelText: text('Notes', 'Ghi chú'),
-            hintText: text('Add notes…', 'Thêm ghi chú…'),
-            border: InputBorder.none,
-            counterText: '',
-          ),
+          vietnamese: widget.vietnamese,
           onChanged: (value) => save({'notes': value}),
         ),
         OrganizationFields(

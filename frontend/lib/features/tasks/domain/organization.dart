@@ -23,6 +23,11 @@ class Organization {
           'task',
           data['parent_id'],
         ),
+        'note' when data['project_id'] != null => find(
+          'project',
+          data['project_id'],
+        ),
+        'note' => find('task_list', data['list_id']),
         'task' when data['project_id'] != null => find(
           'project',
           data['project_id'],
@@ -78,6 +83,11 @@ class Organization {
     }
     if (item.kind == 'project' && item.data['space_id'] == null) {
       throw StateError('A project requires a Space');
+    }
+    if (item.kind == 'note' &&
+        ['list_id', 'project_id'].where((k) => item.data[k] != null).length !=
+            1) {
+      throw StateError('A note requires exactly one Space or project');
     }
     if (item.kind != 'task') return;
     if ([

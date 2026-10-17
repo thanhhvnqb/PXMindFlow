@@ -115,6 +115,13 @@ class Task(Tagged):
         return value
 
 
+class Note(Named):
+    notes: str = Field(default="", max_length=20000)
+    list_id: str | None = None
+    project_id: str | None = None
+    identifier = field_validator("list_id", "project_id")(Task.identifier.__func__)
+
+
 class Habit(Named):
     timezone: str = "Etc/UTC"
     target: int = Field(default=1, ge=1, le=10000)
@@ -155,6 +162,7 @@ SCHEMAS = {
     "project": Project,
     "tag": Tag,
     "task": Task,
+    "note": Note,
     "habit": Habit,
     "habit_checkin": Checkin,
     "focus_session": Focus,
