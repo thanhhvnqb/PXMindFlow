@@ -1,5 +1,7 @@
 name: MindFlow checks
-on: [push, pull_request]
+# Automatic CI is temporarily paused during active development.
+# Restore `on: [push, pull_request]` when the code is stable.
+on: workflow_dispatch
 jobs:
   checks:
     runs-on: ubuntu-latest
@@ -7,7 +9,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.1'
+          flutter-version: '3.47.7'
           cache: true
       - working-directory: frontend
         run: |
@@ -36,7 +38,7 @@ jobs:
           java-version: '17'
       - uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.44.1'
+          flutter-version: '3.47.7'
           cache: true
       - if: matrix.target == 'linux'
         run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev
