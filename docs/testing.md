@@ -109,3 +109,49 @@ Web release compilation also passes with `flutter build web --dart-define=API_UR
 `flutter analyze` passes; `flutter test` passes 26 tests (one external API integration test skipped without `TEST_API_URL`). Tests cover selecting time as UTC, removing time without removing its day, draft retention/retry and editing notes directly into the SQLite/outbox flow. `flutter build web --no-wasm-dry-run --dart-define=API_URL=http://localhost:8000/api/v1` passes. The Linux integration smoke test was attempted but cannot build because CMake is absent; no system packages were installed. Android/iOS/Windows/macOS builds and manual workstation browser/tunnel tests were not performed.
 
 `scripts/test_backend.sh` passes all 11 PostgreSQL API tests, including timed-task push/pull, removal of time and rejection of non-UTC/naive timestamps. Alembic upgrade and schema check pass (`No new upgrade operations detected`). Tests use the script's disposable isolated Compose project; the existing `pxmindflow` development database is untouched.
+
+## Space/Project organization verification — 2026-10-17
+
+- `cd frontend && flutter analyze`: no issues.
+- `cd frontend && flutter test`: 36 passed, one optional real-HTTP API test
+  skipped because its endpoint was not configured for this run.
+- `scripts/test_backend.sh`: 13 passed in isolated PostgreSQL containers;
+  `alembic upgrade head` and `alembic check` passed. Includes v0003 migration
+  with legacy rows in a transactionally rolled-back schema.
+- `ruff check backend/app backend/tests` and `git diff --check`: passed.
+- `cd frontend && flutter build web`: passed (compilation; not browser runtime).
+- `flutter test integration_test/local_task_smoke_test.dart -d linux`: attempted,
+  blocked before application launch because CMake is absent. No system tools
+  were installed. Chrome/ChromeDriver are absent; browser automation and manual
+  workstation SSH-tunnel testing were not performed. Android, iOS, Windows and
+  macOS builds were not verified on this host.
+
+New tests cover effective tags and direct bindings, Space/Project/parent moves,
+four nested subtask levels and detaching a branch, archive/restore independent
+of project status, archived-tag discovery, offline full-text organization search,
+invalid references and cycles, tenant isolation, subtree tombstone ordering,
+dependency-ordered sync after lost ACK, and v2→v3 record/outbox preservation,
+including sent operation IDs and payload bytes. UI tests verify direct/inherited
+tag separation, archive suggestions, placement fields and required Project Space.
+The full MVP fault-injection matrix remains outside this increment's coverage.
+
+## Validation-rejection recovery — 2026-10-17
+
+The running development API predated project_id/due_at and rejected new-client
+payloads. Its existing pxmindflow service was rebuilt from this checkout using
+the original Compose configuration/environment plus a build-context-only override;
+its PostgreSQL volume was retained and additive migration 0003 applied.
+
+Regression coverage checks new task retries, acknowledged update retries after
+an API upgrade, fresh operation identities, legacy invalid_payload conflicts,
+retained local edits/versions and rejecting Keep server without a snapshot.
+The API regression checks canonical snapshots on validation failures and cached
+rejections followed by successful fresh retries. No browser-owned SQLite data
+was accessed or cleared; the user must refresh their browser and retry its
+existing rejected operation once the API/web server are updated.
+
+Final recovery checks: Flutter analysis passed; 39 Flutter tests passed (one
+optional HTTP test skipped); 14 isolated PostgreSQL tests and Alembic schema
+check passed; Ruff and diff checks passed. Live API health returned ok, live
+payload validation accepted project_id/parent_id/due_at, and Alembic reported
+0003 (head). Browser interaction remains to be confirmed on the workstation.

@@ -2,7 +2,7 @@
 
 **MindFlow** is a cross-platform, offline-first personal productivity application inspired by the useful workflows of TickTick, with an original interface and independent implementation. The goal is a clean, fast and accessible experience across **Android, iOS, Windows, macOS, Linux and Web**.
 
-> **Project status:** Executable incremental foundation: Flutter client, Drift SQLite/WASM, Dockerized FastAPI/PostgreSQL, authentication, task/list CRUD, explicit sync conflicts, and basic implementations of the six views. This is not the complete MVP. See [implementation status](docs/implementation_status.md) for verified checks and remaining work.
+> **Project status:** Executable incremental foundation: Flutter client, Drift SQLite/WASM, Dockerized FastAPI/PostgreSQL, authentication, Space/Project/Task/Subtask organization, tags and archive, explicit sync conflicts, and basic implementations of the six views. This is not the complete MVP. See [implementation status](docs/implementation_status.md) for verified checks and remaining work.
 
 
 ## Remote server development and SSH tunnel testing
@@ -81,12 +81,12 @@ Platform commands: `flutter build apk`, `flutter build ios --simulator --no-code
 
 | Module | Planned capabilities |
 | --- | --- |
-| **Tasks** | Inbox, projects/lists, subtasks, notes, tags, priority, due dates, reminders, recurring tasks, Today/Upcoming/Completed, sorting and filtering |
+| **Tasks** | Inbox, Spaces, Projects, subtasks, notes, tags, priority, due dates, reminders, recurring tasks, Today/Upcoming/Completed, sorting and filtering |
 | **Eisenhower Matrix** | Four urgency/importance quadrants; drag and drop; edits update the same underlying tasks |
 | **Habit Tracker** | Habit schedules and goals, daily check-ins, streaks, progress and history |
 | **Calendar** | Day/week/month views of scheduled tasks and recurring occurrences |
 | **Pomodoro / Focus** | Configurable focus/break intervals, pause/resume, session history and statistics |
-| **Search** | Local-first full-text task/list/note/habit search and filters |
+| **Search** | Local-first full-text task/Space/Project/tag/note/habit search and filters |
 
 These six modules make up the MVP. Collaboration, an AI assistant, subscriptions, streaming media, motivational quotes and meditation content are **not** in the initial scope.
 

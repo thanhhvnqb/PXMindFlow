@@ -1,8 +1,11 @@
 import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
+
 import '../../../core/db/database.dart';
 import '../domain/item.dart';
+import '../domain/organization.dart';
 
 class LocalRepository {
   final AppDatabase db;
@@ -20,7 +23,15 @@ class LocalRepository {
     if (query.trim().isEmpty) {
       yield* watch().map(
         (items) => items
-            .where((i) => ['task', 'task_list', 'habit'].contains(i.kind))
+            .where(
+              (i) => [
+                'task',
+                'task_list',
+                'project',
+                'tag',
+                'habit',
+              ].contains(i.kind),
+            )
             .toList(),
       );
       return;
@@ -32,8 +43,8 @@ class LocalRepository {
         .map((word) => '"${word.replaceAll('"', '""')}"*')
         .join(' AND ');
     final sql = fts == 'true'
-        ? "SELECT r.* FROM records r JOIN record_fts f ON r.id = f.id AND r.kind = f.kind WHERE record_fts MATCH ? AND r.kind IN ('task', 'task_list', 'habit') AND json_extract(r.payload, '\$.deleted_at') IS NULL ORDER BY rank LIMIT 200"
-        : "SELECT * FROM records WHERE kind IN ('task', 'task_list', 'habit') AND json_extract(payload, '\$.deleted_at') IS NULL AND (instr(lower(json_extract(payload, '\$.title')), lower(?)) > 0 OR instr(lower(coalesce(json_extract(payload, '\$.notes'), '')), lower(?)) > 0) LIMIT 200";
+        ? "SELECT r.* FROM records r JOIN record_fts f ON r.id = f.id AND r.kind = f.kind WHERE record_fts MATCH ? AND r.kind IN ('task', 'task_list', 'project', 'tag', 'habit') AND json_extract(r.payload, '\$.deleted_at') IS NULL ORDER BY rank LIMIT 200"
+        : "SELECT * FROM records WHERE kind IN ('task', 'task_list', 'project', 'tag', 'habit') AND json_extract(payload, '\$.deleted_at') IS NULL AND (instr(lower(json_extract(payload, '\$.title')), lower(?)) > 0 OR instr(lower(coalesce(json_extract(payload, '\$.notes'), '')), lower(?)) > 0) LIMIT 200";
     yield* db
         .customSelect(
           sql,
@@ -79,6 +90,32 @@ class LocalRepository {
             : const Uuid().v4());
     await db.transaction(() async {
       final current = await get(kind, entityId);
+      final rows = await db.select(db.records).get();
+      final organization = Organization(
+        rows.map((r) => Item(r.id, r.kind, r.version, jsonDecode(r.payload))),
+      );
+      if (!delete) {
+        organization.validate(
+          Item(entityId, kind, current?.version ?? 0, payload),
+        );
+      } else {
+        final keys = switch (kind) {
+          'task_list' => ['list_id', 'space_id'],
+          'project' => ['project_id'],
+          'task' => ['parent_id'],
+          'tag' => ['tag_ids'],
+          _ => <String>[],
+        };
+        if (organization.items.any(
+          (i) => keys.any(
+            (k) => k == 'tag_ids'
+                ? organization.directTags(i).contains(entityId)
+                : i.data[k] == entityId,
+          ),
+        )) {
+          throw StateError('Record is in use; archive it instead');
+        }
+      }
       final data = {
         ...payload,
         'created_at': current == null
@@ -125,7 +162,31 @@ class LocalRepository {
     Map<String, dynamic> changes, {
     bool delete = false,
   }) => db.transaction(() async {
-    for (final id in ids.toSet()) {
+    final targets = ids.toSet().toList();
+    if (delete) {
+      final rows = await db.select(db.records).get();
+      final organization = Organization(
+        rows.map((r) => Item(r.id, r.kind, r.version, jsonDecode(r.payload))),
+      );
+      final roots = targets.toSet();
+      final descendants = organization.items
+          .where(
+            (i) =>
+                i.kind == 'task' &&
+                organization
+                    .ancestors(i)
+                    .any((a) => a.kind == 'task' && roots.contains(a.id)),
+          )
+          .toList();
+      descendants.sort(
+        (a, b) => organization
+            .ancestors(b)
+            .length
+            .compareTo(organization.ancestors(a).length),
+      );
+      targets.insertAll(0, descendants.map((i) => i.id));
+    }
+    for (final id in targets.toSet()) {
       final row = await get('task', id);
       if (row == null) continue;
       final payload = jsonDecode(row.payload) as Map<String, dynamic>;
@@ -183,6 +244,19 @@ class LocalRepository {
         );
   }
 
+  static bool isValidationFailure(Conflict conflict) =>
+      conflict.reason.startsWith('validation_failure:') ||
+      const {
+        'invalid_payload',
+        'invalid_reference',
+        'payload_too_large',
+        'ambiguous_task_context',
+        'task_cycle',
+        'record_in_use',
+        'invalid_checkin_identity',
+        'operation_id_reused',
+      }.contains(conflict.reason);
+
   Future<void> resolve(Conflict conflict, {required bool mine}) async {
     await db.transaction(() async {
       final latestConflict =
@@ -195,6 +269,45 @@ class LocalRepository {
       if (latestConflict == null) return;
       final latestLocal = await get(conflict.kind, conflict.entityId);
       final remote = jsonDecode(latestConflict.remote);
+      // A rejection without a snapshot says nothing about server existence.
+      // Preserve the acknowledged version so retry remains an update, not create.
+      if (isValidationFailure(latestConflict) && remote == null) {
+        if (!mine || latestLocal == null) {
+          throw StateError(
+            'No server snapshot is available; local changes are retained',
+          );
+        }
+        final local = jsonDecode(latestLocal.payload) as Map<String, dynamic>;
+        await (db.delete(db.outbox)..where(
+              (r) =>
+                  r.entityId.equals(conflict.entityId) &
+                  r.kind.equals(conflict.kind),
+            ))
+            .go();
+        await save(
+          conflict.kind,
+          clean(local),
+          id: conflict.entityId,
+          delete: local['deleted_at'] != null,
+        );
+        if (latestLocal.version == 0 && local['deleted_at'] == null) {
+          // Only the new, unsent retry is changed; frozen requests stay immutable.
+          await (db.update(db.outbox)..where(
+                (r) =>
+                    r.entityId.equals(conflict.entityId) &
+                    r.kind.equals(conflict.kind) &
+                    r.sent.equals(false),
+              ))
+              .write(const OutboxCompanion(operation: Value('create')));
+        }
+        await (db.delete(db.conflicts)..where(
+              (r) =>
+                  r.entityId.equals(conflict.entityId) &
+                  r.kind.equals(conflict.kind),
+            ))
+            .go();
+        return;
+      }
       // Explicit resolution supersedes all pending edits for this entity.
       await (db.delete(db.outbox)..where(
             (r) =>
@@ -212,9 +325,9 @@ class LocalRepository {
             .go();
       }
       if (mine) {
-        final local =
-            jsonDecode(latestLocal?.payload ?? latestConflict.local)
-                as Map<String, dynamic>;
+        final local = jsonDecode(
+          latestLocal?.payload ?? latestConflict.local,
+        ) as Map<String, dynamic>;
         // A deleted server record cannot be resurrected under the same identity.
         if (remote != null &&
             remote['payload']['deleted_at'] != null &&

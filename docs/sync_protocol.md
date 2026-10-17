@@ -13,3 +13,26 @@ Worker retries with capped exponential backoff and jitter; foreground and local 
 Conflict snapshots track subsequent local edits. Resolution reads the latest local payload and conflict in its transaction, so edits made while attention or a dialog is open are retained. Habit check-in UUIDv5 identity derives from habit/date/captured timezone; the server verifies it and version-conflicts duplicate creates rather than counting twice.
 
 Timed-task payloads include optional UTC `due_at`; it uses the same atomic outbox, canonical ACK, pull and explicit-conflict paths as other task fields. Inline details send field patches through a repository transaction that reads the latest local task, preventing stale UI snapshots from overwriting unrelated local fields. There is no separate calendar or scheduling record.
+
+Organization records (`task_list` as Space, `project`, `tag`) share this same
+protocol. Create referenced tags/Spaces before Projects/tasks and parents before
+subtasks. Placement and tags are editable fields, so concurrent placement/tag
+edits use the existing explicit version-conflict queue. Subtask context and
+inherited tags are derived at read time; moving a parent or archiving a Space
+never enqueues synthetic child updates. Deletes of referenced organization
+records fail with `record_in_use`; Task subtree deletion queues deepest children
+first in one local transaction. A remote child edit can conflict during that
+sequence; dependent parent deletion then remains blocked rather than orphaning
+that child. Archive retains every record and binding and is independent of
+project lifecycle status. Upgrade the API before using the new client fields.
+
+Validation rejection recovery: a missing snapshot on `validation_failure` means
+unknown server state, not record absence. Retrying keeps the local record, UUID,
+acknowledged version and latest edits, and replaces the rejected operations with
+a fresh operation ID. Version-zero live records retry as creates; acknowledged
+records retry as updates. Legacy unprefixed invalid_payload conflicts follow the
+same path. Keep server is unavailable without an authoritative snapshot; the
+repository rejects that action rather than deleting local data. Updated API
+validation results include the current authorized snapshot when one exists.
+Rejected operation results remain immutable/idempotent, so updating the server
+requires retrying with a fresh operation ID rather than replaying cached rejection.

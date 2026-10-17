@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
+
 import '../domain/item.dart';
 import 'task_controls.dart';
+import 'organization_fields.dart';
 
 /// Each patch is merged with the latest SQLite row by the repository.
 class TaskDetails extends StatefulWidget {
@@ -9,6 +11,8 @@ class TaskDetails extends StatefulWidget {
   final bool vietnamese;
   final Future<void> Function(Map<String, dynamic>) onSave;
   final VoidCallback onClose;
+  final VoidCallback? onAddSubtask;
+  final void Function(Item)? onOpenTask;
   const TaskDetails({
     super.key,
     required this.item,
@@ -16,6 +20,8 @@ class TaskDetails extends StatefulWidget {
     required this.vietnamese,
     required this.onSave,
     required this.onClose,
+    this.onAddSubtask,
+    this.onOpenTask,
   });
   @override
   State<TaskDetails> createState() => _TaskDetailsState();
@@ -140,24 +146,33 @@ class _TaskDetailsState extends State<TaskDetails> {
           ),
           onChanged: (value) => save({'notes': value}),
         ),
-        DropdownButtonFormField<String>(
-          key: ValueKey(widget.item.data['list_id']),
-          initialValue:
-              widget.lists.any((l) => l.id == widget.item.data['list_id'])
-              ? widget.item.data['list_id'] as String?
-              : null,
-          decoration: InputDecoration(labelText: text('List', 'Danh sách')),
-          items: [
-            DropdownMenuItem(
-              value: null,
-              child: Text(text('Inbox', 'Hộp thư')),
-            ),
-            ...widget.lists.map(
-              (l) => DropdownMenuItem(value: l.id, child: Text(l.title)),
-            ),
-          ],
-          onChanged: (value) => save({'list_id': value}),
+        OrganizationFields(
+          item: widget.item,
+          all: widget.lists,
+          vietnamese: widget.vietnamese,
+          onChanged: save,
         ),
+        if (widget.onAddSubtask != null)
+          TextButton.icon(
+            onPressed: widget.onAddSubtask,
+            icon: const Icon(Icons.add),
+            label: Text(text('Add subtask', 'Thêm công việc con')),
+          ),
+        ...widget.lists
+            .where(
+              (i) => i.kind == 'task' && i.data['parent_id'] == widget.item.id,
+            )
+            .map(
+              (i) => ListTile(
+                leading: Icon(
+                  i.completed
+                      ? Icons.check_circle_outline
+                      : Icons.radio_button_unchecked,
+                ),
+                title: Text(i.title),
+                onTap: () => widget.onOpenTask?.call(i),
+              ),
+            ),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           title: Text(text('Urgent', 'Khẩn cấp')),

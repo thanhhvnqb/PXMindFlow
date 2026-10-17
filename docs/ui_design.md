@@ -15,3 +15,13 @@ The task workspace has three content columns beside the rail: organization (230 
 Task quick entry now uses an inline title field with Enter submission, date and priority controls, and an expand action. Reusable calendar and flag menus are shared by creation, editing and desktop details, retaining MindFlow's Material theme and accessible labels. Advanced scheduling (time/duration/reminder/repeat) remains pending domain support.
 
 Task quick entry places the date/time trigger at the trailing end of its input. The shared calendar includes an optional time picker and independent time clearing. Task details now contain directly editable title/notes and immediate scheduling, completion, priority, list and matrix controls, plus local save/error status. The explicit Edit action is removed; compact layouts use the same details component in a dialog.
+
+Organization now exposes Space → Project → Task → Subtask, with no separate
+Folder/List/Group/Section/Workspace level. Global views remain projections. Space
+selection includes Project tasks; Project selection includes nested subtasks.
+Task rows indent at most three levels. Details list immediate subtasks with
+navigation, allow selecting a parent/location and show only direct tags as chips.
+Inherited tags expand on demand with their source. Space/Project/Tag editors
+separate archive from project status. Include-archived and archived-tag controls
+keep old work discoverable and restorable. New Projects require a Space; task
+quick entry still works in Inbox with no organization setup.

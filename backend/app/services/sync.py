@@ -5,6 +5,7 @@ from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import HTTPException
 from pydantic import ValidationError
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.entities import Change, Operation, Record
@@ -22,7 +23,9 @@ def snapshot(row):
     }
 
 
-async def validate(db: AsyncSession, uid: str, kind: str, payload: dict) -> str | None:
+async def validate(
+    db: AsyncSession, uid: str, kind: str, payload: dict, entity_id: str | None = None
+) -> str | None:
     try:
         SCHEMAS[kind].model_validate(payload)
     except (ValidationError, ValueError, TypeError):
@@ -31,6 +34,8 @@ async def validate(db: AsyncSession, uid: str, kind: str, payload: dict) -> str 
         return "payload_too_large"
     for key, related in (
         ("list_id", "task_list"),
+        ("space_id", "task_list"),
+        ("project_id", "project"),
         ("parent_id", "task"),
         ("habit_id", "habit"),
     ):
@@ -38,7 +43,49 @@ async def validate(db: AsyncSession, uid: str, kind: str, payload: dict) -> str 
             parent = await store.record(db, uid, related, payload[key])
             if not parent or parent.payload.get("deleted_at"):
                 return "invalid_reference"
+    for tag_id in payload.get("tag_ids", []):
+        tag = await store.record(db, uid, "tag", tag_id)
+        if not tag or tag.payload.get("deleted_at"):
+            return "invalid_reference"
+    if kind == "task":
+        if (
+            sum(bool(payload.get(k)) for k in ("list_id", "project_id", "parent_id"))
+            > 1
+        ):
+            return "ambiguous_task_context"
+        seen = {entity_id}
+        parent_id = payload.get("parent_id")
+        while parent_id:
+            if parent_id in seen:
+                return "task_cycle"
+            seen.add(parent_id)
+            parent = await store.record(db, uid, "task", parent_id)
+            if not parent or parent.payload.get("deleted_at"):
+                return "invalid_reference"
+            parent_id = parent.payload.get("parent_id")
     return None
+
+
+async def referenced(db: AsyncSession, uid: str, kind: str, entity_id: str) -> bool:
+    keys = {
+        "task_list": ("list_id", "space_id"),
+        "project": ("project_id",),
+        "task": ("parent_id",),
+        "tag": ("tag_ids",),
+    }.get(kind, ())
+    if not keys:
+        return False
+    rows = (await db.scalars(select(Record).where(Record.user_id == uid))).all()
+    return any(
+        not r.payload.get("deleted_at")
+        and any(
+            entity_id in r.payload.get(k, [])
+            if k == "tag_ids"
+            else r.payload.get(k) == entity_id
+            for k in keys
+        )
+        for r in rows
+    )
 
 
 async def push(db: AsyncSession, uid: str, mutations: list[Mutation]) -> dict:
@@ -97,10 +144,20 @@ async def push(db: AsyncSession, uid: str, mutations: list[Mutation]) -> dict:
                 error = (
                     None
                     if mutation.operation == "delete"
-                    else await validate(db, uid, mutation.entity_type, mutation.payload)
+                    else await validate(
+                        db, uid, mutation.entity_type, mutation.payload, entity_id
+                    )
                 )
+                if mutation.operation == "delete" and await referenced(
+                    db, uid, mutation.entity_type, entity_id
+                ):
+                    error = "record_in_use"
                 if error:
-                    result.update(status="validation_failure", code=error)
+                    result.update(
+                        status="validation_failure",
+                        code=error,
+                        record=snapshot(row) if row else None,
+                    )
                 else:
                     now = datetime.now(timezone.utc).isoformat()
                     payload = dict(

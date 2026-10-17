@@ -25,7 +25,9 @@ class Mutation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation_id: UUID
     device_id: UUID
-    entity_type: Literal["task_list", "task", "habit", "habit_checkin", "focus_session"]
+    entity_type: Literal[
+        "task_list", "project", "tag", "task", "habit", "habit_checkin", "focus_session"
+    ]
     entity_id: UUID
     operation: Literal["create", "update", "delete"]
     base_version: int = Field(ge=0)

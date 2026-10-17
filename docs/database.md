@@ -13,3 +13,7 @@ Server migration 0002 adds shared auth rate windows (hashed client address, minu
 Web storage warnings use the selected Drift implementation, rather than missing optional browser APIs. OPFS and shared IndexedDB are supported persistent modes; unsafe IndexedDB warns to use one tab, and in-memory fallback warns of data loss on reload. Browser eviction/private-mode limitations still apply; no storage migration or clearing is performed.
 
 Tasks optionally carry `due_at`, a UTC ISO timestamp validated by the API. Null/absent preserves existing date-only tasks. `due_date` records the selected calendar date; when `due_at` exists, projections derive their day and time from the instant in the viewer's current device timezone. Changing device timezone preserves the instant, so its displayed calendar day can change; removing time preserves the currently selected local day. Local DateTime conversion uses OS/browser timezone rules: spring DST gaps normalize forward and repeated fall times use the runtime's selected offset. Arbitrary IANA-zone scheduling and explicit DST-fold selection are not supported in this increment. Existing `timezone` metadata is not used to reinterpret the UTC instant. No existing outbox or records are rewritten.
+
+Organization v3 / server 0003 adds non-destructive reference indexes. `task_list`
+now means Space; legacy IDs and list_id references remain stable. See
+[organization](features/organization.md) for canonical placement, tags and archive.

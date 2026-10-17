@@ -4,8 +4,10 @@ from sqlalchemy import (
     BigInteger,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -60,3 +62,12 @@ class AuthRateWindow(Base):
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     window: Mapped[int] = mapped_column(BigInteger, primary_key=True)
     count: Mapped[int] = mapped_column(Integer)
+
+
+for _key in ("list_id", "space_id", "project_id", "parent_id", "archived_at"):
+    Index(
+        f"records_{_key}",
+        Record.user_id,
+        Record.entity_type,
+        text(f"(payload->>'{_key}')"),
+    )

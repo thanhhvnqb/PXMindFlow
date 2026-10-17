@@ -15,3 +15,8 @@ Six Flutter platform runners are scaffolded; builds must be verified individuall
 Dependencies: frontend/pubspec.lock and backend/requirements.lock pin the resolved dependency graph. Backend requirements.txt records direct requirements; container installs the lock. SDK flutter_localizations pins intl 0.20.2. Six-platform CI configuration is provided but has not run during this session.
 
 Account repository overrides live in a nested ProviderScope. The repository is explicitly scoped (`dependencies: []`) and every repository-dependent stream declares that dependency, so domain data, pending counts, conflicts and search resolve inside the account container. Opening verifies local records before sync starts; failures display diagnostic details and allow reopening the same database without resetting its outbox.
+
+Organization uses the existing envelope storage and sync protocol. The compatible
+List → Space rename avoids rewriting unsent payloads or server history. Domain
+relationship projection is shared by task filters, inherited tags and archive
+visibility. See [organization](features/organization.md).

@@ -225,8 +225,16 @@ async def test_timed_task_survives_push_pull_and_date_only_update(client):
     result = (await push(client, token, op))[0]
     assert result["status"] == "applied"
     page = await pull(client, token)
-    assert page["changes"][0]["record"]["payload"]["due_at"] == "2026-10-17T07:00:00.000Z"
-    update = mutation(entity_id=op["entity_id"], version=1, operation="update", due_date="2026-10-17", due_at=None)
+    assert (
+        page["changes"][0]["record"]["payload"]["due_at"] == "2026-10-17T07:00:00.000Z"
+    )
+    update = mutation(
+        entity_id=op["entity_id"],
+        version=1,
+        operation="update",
+        due_date="2026-10-17",
+        due_at=None,
+    )
     assert (await push(client, token, update))[0]["status"] == "applied"
     page = await pull(client, token, cursor=page["next_cursor"])
     assert page["changes"][0]["record"]["payload"]["due_at"] is None
@@ -234,9 +242,100 @@ async def test_timed_task_survives_push_pull_and_date_only_update(client):
 
 def test_task_due_at_requires_utc():
     from pydantic import ValidationError
+
     from app.schemas.payloads import Task
 
     for value in ["invalid", "2026-10-17T14:00:00", "2026-10-17T14:00:00+07:00"]:
         with pytest.raises(ValidationError):
             Task(title="Timed", due_at=value)
     assert Task(title="Date only").due_at is None
+
+
+@pytest.mark.asyncio
+async def test_organization_ownership_context_archive_and_cycles(client):
+    user = await account(client)
+    other = await account(client)
+    token = user["access_token"]
+    tag = mutation(kind="tag")
+    space = mutation(kind="task_list", tag_ids=[tag["entity_id"]])
+    project = mutation(kind="project", space_id=space["entity_id"], status="on_hold")
+    task = mutation(project_id=project["entity_id"])
+    child = mutation(parent_id=task["entity_id"])
+    results = await push(client, token, tag, space, project, task, child)
+    assert all(r["status"] == "applied" for r in results)
+    for op in [
+        mutation(kind="project", space_id=space["entity_id"]),
+        mutation(project_id=project["entity_id"]),
+        mutation(tag_ids=[tag["entity_id"]]),
+        mutation(parent_id=task["entity_id"]),
+    ]:
+        result = (await push(client, other["access_token"], op))[0]
+        assert result["code"] == "invalid_reference"
+    mixed = mutation(list_id=space["entity_id"], project_id=project["entity_id"])
+    assert (await push(client, token, mixed))[0]["code"] == "ambiguous_task_context"
+    cycle = mutation(
+        entity_id=task["entity_id"],
+        version=1,
+        operation="update",
+        parent_id=child["entity_id"],
+    )
+    assert (await push(client, token, cycle))[0]["code"] == "task_cycle"
+    for op in [space, project, task, tag]:
+        deletion = mutation(
+            entity_id=op["entity_id"],
+            kind=op["entity_type"],
+            version=1,
+            operation="delete",
+        )
+        assert (await push(client, token, deletion))[0]["code"] == "record_in_use"
+    for op in [tag, space, project]:
+        fields = {k: v for k, v in op["payload"].items() if k != "title"}
+        archived = mutation(
+            entity_id=op["entity_id"],
+            kind=op["entity_type"],
+            version=1,
+            operation="update",
+            **fields,
+            archived_at="2026-10-17T10:00:00Z",
+        )
+        assert (await push(client, token, archived))[0]["status"] == "applied"
+        restored = mutation(
+            entity_id=op["entity_id"],
+            kind=op["entity_type"],
+            version=2,
+            operation="update",
+            **fields,
+            archived_at=None,
+        )
+        assert (await push(client, token, restored))[0]["status"] == "applied"
+    changes = (await pull(client, token))["changes"]
+    child_changes = [c for c in changes if c["record"]["id"] == child["entity_id"]]
+    assert len(child_changes) == 1
+    assert child_changes[0]["record"]["payload"]["parent_id"] == task["entity_id"]
+    assert (await pull(client, other["access_token"]))["changes"] == []
+
+
+@pytest.mark.asyncio
+async def test_invalid_update_returns_server_snapshot_and_fresh_retry_succeeds(client):
+    user = await account(client)
+    token = user["access_token"]
+    original = mutation()
+    await push(client, token, original)
+    invalid = mutation(
+        entity_id=original["entity_id"], version=1, operation="update", priority=99
+    )
+    rejection = (await push(client, token, invalid))[0]
+    assert rejection["code"] == "invalid_payload"
+    assert rejection["record"]["version"] == 1
+    assert (await push(client, token, invalid))[0]["duplicate"]
+    retry = mutation(
+        entity_id=original["entity_id"],
+        version=1,
+        operation="update",
+        title="Keep my edit",
+        project_id=None,
+        parent_id=None,
+    )
+    result = (await push(client, token, retry))[0]
+    assert result["status"] == "applied"
+    assert result["record"]["version"] == 2
