@@ -221,6 +221,7 @@ Repeat task/offline/restart/sync tests on the emulator, and check back navigatio
 | Server health works but workstation health fails | Keep the SSH session running; verify the SSH destination and forwarded ports on the workstation |
 | Login fails | Health, migration, `docker compose -p pxmindflow logs --tail=100 api`, password length of at least 12 characters |
 | CORS error / registration OPTIONS returns 400 | Development allows `http://localhost:8080` and `http://127.0.0.1:8080`. Other ports require their exact browser origin in `CORS_ORIGINS`; after editing `.env`, run `docker compose -p pxmindflow up -d api` to recreate the service environment. A restart alone does not load changed environment values. |
+| Generic storage error after login | Updated code declares account scope for all repository-dependent Riverpod providers. Restart the Web server from the intended checkout and reload the same origin. For an actual startup failure, use Retry storage and Diagnostic details; preserve site data. |
 | Storage appears empty after reload | Same origin/profile/account? In-memory warning? WASM/worker responses contain the actual files rather than HTML? |
 | Chrome missing from devices | Chrome installation, `CHROME_EXECUTABLE`, `flutter doctor -v` |
 | Driver session fails | Compatible ChromeDriver/Chrome versions, port 4444 available, driver started first |
@@ -228,3 +229,9 @@ Repeat task/offline/restart/sync tests on the emulator, and check back navigatio
 | Web builds but fails at runtime | Console + Network, secure context localhost/HTTPS, storage restrictions, asset MIME |
 
 Stop the development environment with `docker compose -p pxmindflow down` when needed; preserve volumes. Do not use `down -v` or prune commands to troubleshoot.
+
+### Startup diagnostics and checkout selection
+
+Run `scripts/run_web.sh` from the intended checkout; it resolves and prints that checkout's frontend directory. Keep only one Web server on port 8080. A server launched from another worktree will keep serving that worktree, even after edits in this one. On Linux, inspect the Flutter process working directory with `readlink /proc/<pid>/cwd`. Restart the intended checkout and reload the same browser origin without clearing site data.
+
+The HTML shell displays loading progress before Flutter's first frame and offers a reload button after 30 seconds or a startup error. `flutter_bootstrap.js` loads CanvasKit from the same server (`canvaskit/`) instead of requiring access to Google's renderer CDN. Debug compilation and the initial download may take time; wait for Flutter to print “is being served” before opening the browser. If the app still does not render, inspect Console and Network and preserve browser storage.

@@ -1,12 +1,16 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../app/providers.dart';
 import '../features/tasks/domain/item.dart';
+import '../features/tasks/presentation/task_controls.dart';
+import '../features/tasks/presentation/task_details.dart';
+import '../features/tasks/domain/task_query.dart';
 import '../features/tasks/data/local_repository.dart';
 
 class MindFlowShell extends ConsumerStatefulWidget {
@@ -47,8 +51,14 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     Icons.timelapse_outlined,
     Icons.search,
   ];
+  String? activeTaskId;
+  bool inlineDetails = false;
   String filter = 'All';
   String search = '';
+  String taskSort = 'priority';
+  int? priorityFilter;
+  bool selecting = false;
+  final selectedTasks = <String>{};
   String? listId;
   DateTime date = DateTime.now();
   Timer? ticker;
@@ -124,13 +134,21 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     return result;
   }
 
-  Future<void> editor({Item? item, String kind = 'task'}) async {
-    final title = TextEditingController(text: item?.title ?? '');
+  Future<bool> editor({
+    Item? item,
+    String kind = 'task',
+    String initialTitle = '',
+    String? initialDue,
+    String? initialDueAt,
+    int initialPriority = 0,
+  }) async {
+    final title = TextEditingController(text: item?.title ?? initialTitle);
     final notes = TextEditingController(text: item?.notes ?? '');
     var urgent = item?.data['is_urgent'] == true;
     var important = item?.data['is_important'] == true;
-    var due = item?.dueDate;
-    var priority = item?.data['priority'] as int? ?? 0;
+    var due = item?.dueDate ?? initialDue;
+    var dueAt = item?.data['due_at'] as String? ?? initialDueAt;
+    var priority = item?.data['priority'] as int? ?? initialPriority;
     var project = item?.data['list_id'] as String? ?? listId;
     final lists =
         ref
@@ -141,6 +159,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
             .toList() ??
         [];
     final form = GlobalKey<FormState>();
+    var saved = false;
+    var saving = false;
     await managedDialog<void>(
       context: context,
       builder: (context) => StatefulBuilder(
@@ -158,6 +178,29 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (kind == 'task') ...[
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TaskDateButton(
+                              value: due,
+                              vietnamese: widget.vietnamese,
+                              dueAt: dueAt,
+                              onChanged: (value, at) => update(() {
+                                due = value;
+                                dueAt = at;
+                              }),
+                            ),
+                          ),
+                          TaskPriorityButton(
+                            value: priority,
+                            vietnamese: widget.vietnamese,
+                            onChanged: (value) =>
+                                update(() => priority = value),
+                          ),
+                        ],
+                      ),
+                    ],
                     TextFormField(
                       controller: title,
                       autofocus: true,
@@ -203,20 +246,6 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         onChanged: (value) => project = value,
                       ),
                       const SizedBox(height: 12),
-                      DropdownButtonFormField<int>(
-                        initialValue: priority,
-                        decoration: InputDecoration(
-                          labelText: label('Priority', 'Ưu tiên'),
-                        ),
-                        items: List.generate(
-                          4,
-                          (p) => DropdownMenuItem(
-                            value: p,
-                            child: Text(['None', 'Low', 'Medium', 'High'][p]),
-                          ),
-                        ),
-                        onChanged: (p) => priority = p ?? 0,
-                      ),
                       SwitchListTile(
                         title: Text(label('Urgent', 'Khẩn cấp')),
                         value: urgent,
@@ -226,40 +255,6 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         title: Text(label('Important', 'Quan trọng')),
                         value: important,
                         onChanged: (v) => update(() => important = v),
-                      ),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: TextButton.icon(
-                              icon: const Icon(Icons.event),
-                              label: Text(
-                                due ?? label('Set due date', 'Chọn ngày'),
-                              ),
-                              onPressed: () async {
-                                final value = await showDatePicker(
-                                  context: context,
-                                  firstDate: DateTime(2000),
-                                  lastDate: DateTime(2100),
-                                  initialDate: due == null
-                                      ? DateTime.now()
-                                      : DateTime.parse(due!),
-                                );
-                                if (value != null) {
-                                  update(
-                                    () => due = DateFormat(
-                                      'yyyy-MM-dd',
-                                    ).format(value),
-                                  );
-                                }
-                              },
-                            ),
-                          ),
-                          IconButton(
-                            tooltip: label('Clear date', 'Xóa ngày'),
-                            onPressed: () => update(() => due = null),
-                            icon: const Icon(Icons.clear),
-                          ),
-                        ],
                       ),
                     ],
                   ],
@@ -274,9 +269,10 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
             ),
             FilledButton(
               onPressed: () async {
-                if (!form.currentState!.validate()) return;
-                await perform(
-                  () => repo.save(kind, {
+                if (saving || !form.currentState!.validate()) return;
+                update(() => saving = true);
+                try {
+                  await repo.save(kind, {
                     ...?item?.data,
                     'title': title.text.trim(),
                     if (kind == 'task') ...{
@@ -284,6 +280,7 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                       'priority': priority,
                       'list_id': project,
                       'due_date': due,
+                      'due_at': dueAt,
                       'completed': item?.completed ?? false,
                       'is_urgent': urgent,
                       'is_important': important,
@@ -292,8 +289,24 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                       'timezone': 'Etc/UTC',
                       'target': 1,
                     },
-                  }, id: item?.id),
-                );
+                  }, id: item?.id);
+                  saved = true;
+                } catch (_) {
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          label(
+                            'Could not save. Try again.',
+                            'Không thể lưu. Hãy thử lại.',
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+                  if (context.mounted) update(() => saving = false);
+                  return;
+                }
                 if (context.mounted) Navigator.pop(context);
               },
               child: Text(label('Save', 'Lưu')),
@@ -304,7 +317,35 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     );
     title.dispose();
     notes.dispose();
+    return saved;
   }
+
+  Future<void> openTaskDetails(Item item) => managedDialog<void>(
+    context: context,
+    builder: (dialogContext) => Dialog(
+      child: SizedBox(
+        width: 500,
+        child: Consumer(
+          builder: (context, ref, _) {
+            final all = ref.watch(itemsProvider).asData?.value ?? <Item>[];
+            final current =
+                all
+                    .where((i) => i.kind == 'task' && i.id == item.id)
+                    .firstOrNull ??
+                item;
+            return TaskDetails(
+              key: ValueKey(item.id),
+              item: current,
+              lists: all.where((i) => i.kind == 'task_list').toList(),
+              vietnamese: widget.vietnamese,
+              onSave: (patch) => repo.updateTasks([item.id], patch),
+              onClose: () => Navigator.pop(dialogContext),
+            );
+          },
+        ),
+      ),
+    ),
+  );
 
   Future<void> remove(Item item) async {
     final confirmed = await showDialog<bool>(
@@ -341,18 +382,64 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     }
   }
 
-  Widget taskTile(Item item) => Card(
-    margin: const EdgeInsets.only(bottom: 8),
+  Future<void> bulkDelete(List<Item> items) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          label(
+            'Delete ${items.length} tasks?',
+            'Xóa ${items.length} công việc?',
+          ),
+        ),
+        content: Text(
+          label(
+            'This deletion will sync to your devices.',
+            'Thao tác xóa sẽ đồng bộ với các thiết bị.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(label('Cancel', 'Hủy')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(label('Delete', 'Xóa')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await perform(() async {
+        await repo.updateTasks(items.map((i) => i.id), {}, delete: true);
+        if (mounted) setState(selectedTasks.clear);
+      });
+    }
+  }
+
+  Widget taskTile(Item item, {bool selectable = false}) => Card(
+    margin: const EdgeInsets.only(bottom: 1),
     elevation: 0,
     child: ListTile(
+      dense: true,
+      selected: widget.view == 'tasks' && activeTaskId == item.id,
       leading: Checkbox(
-        value: item.completed,
-        onChanged: (value) => perform(
-          () => repo.save('task', {
-            ...LocalRepository.clean(item.data),
-            'completed': value,
-          }, id: item.id),
-        ),
+        value: selectable ? selectedTasks.contains(item.id) : item.completed,
+        onChanged: (value) => selectable
+            ? setState(() {
+                if (value == true) {
+                  selectedTasks.add(item.id);
+                } else {
+                  selectedTasks.remove(item.id);
+                }
+              })
+            : perform(
+                () => repo.save('task', {
+                  ...LocalRepository.clean(item.data),
+                  'completed': value,
+                }, id: item.id),
+              ),
       ),
       title: Text(
         item.title,
@@ -363,14 +450,20 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
       subtitle: item.dueDate != null || item.notes.isNotEmpty
           ? Text(
               [
-                if (item.dueDate != null) item.dueDate!,
+                if (item.dueDate != null)
+                  item.dueDate! +
+                      (item.data['due_at'] == null
+                          ? ''
+                          : ', ${DateFormat('HH:mm').format(DateTime.parse(item.data['due_at'] as String).toLocal())}'),
                 if (item.notes.isNotEmpty) item.notes,
               ].join(' · '),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             )
           : null,
-      onTap: () => editor(item: item),
+      onTap: () => inlineDetails && widget.view == 'tasks'
+          ? setState(() => activeTaskId = item.id)
+          : openTaskDetails(item),
       trailing: PopupMenuButton<String>(
         tooltip: label('Task actions', 'Thao tác'),
         onSelected: (_) => remove(item),
@@ -396,77 +489,365 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
       ),
     ),
   );
-  Widget tasks(List<Item> all) {
-    final today = DateFormat('yyyy-MM-dd').format(DateTime.now());
-    final tasks =
-        all
-            .where(
-              (i) =>
-                  i.kind == 'task' &&
-                  (listId == null || i.data['list_id'] == listId),
-            )
-            .where(
-              (i) => switch (filter) {
-                'Today' =>
-                  !i.completed &&
-                      i.dueDate != null &&
-                      i.dueDate!.compareTo(today) <= 0,
-                'Upcoming' =>
-                  !i.completed &&
-                      i.dueDate != null &&
-                      i.dueDate!.compareTo(today) > 0,
-                'Completed' => i.completed,
-                _ => !i.completed,
-              },
-            )
-            .toList()
-          ..sort(
-            (a, b) => (b.data['priority'] as int? ?? 0).compareTo(
-              a.data['priority'] as int? ?? 0,
+  Widget taskOrganization(List<Item> all) => ListView(
+    padding: const EdgeInsets.all(12),
+    children: [
+      Padding(
+        padding: const EdgeInsets.all(12),
+        child: Text(
+          label('My tasks', 'Công việc của tôi'),
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+      ),
+      ...['All', 'Inbox', 'Today', 'Upcoming', 'Completed'].map(
+        (view) => ListTile(
+          dense: true,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          selected: filter == view && listId == null,
+          selectedTileColor: Theme.of(context).colorScheme.secondaryContainer,
+          leading: Icon(
+            const {
+              'All': Icons.layers_outlined,
+              'Inbox': Icons.inbox_outlined,
+              'Today': Icons.today_outlined,
+              'Upcoming': Icons.date_range_outlined,
+              'Completed': Icons.task_alt,
+            }[view],
+          ),
+          title: Text(
+            label(
+              view,
+              const {
+                'All': 'Tất cả',
+                'Inbox': 'Hộp thư',
+                'Today': 'Hôm nay',
+                'Upcoming': 'Sắp tới',
+                'Completed': 'Hoàn thành',
+              }[view]!,
             ),
-          );
+          ),
+          onTap: () => setState(() {
+            filter = view;
+            listId = null;
+          }),
+        ),
+      ),
+      const Divider(height: 32),
+      ListTile(
+        dense: true,
+        title: Text(label('All lists', 'Mọi danh sách')),
+        selected: listId == null,
+        onTap: () => setState(() => listId = null),
+      ),
+      ...all
+          .where((i) => i.kind == 'task_list')
+          .map(
+            (i) => ListTile(
+              dense: true,
+              leading: const Icon(Icons.list_alt_outlined),
+              title: Text(
+                i.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              selected: listId == i.id,
+              onTap: () => setState(() {
+                listId = i.id;
+                filter = 'All';
+              }),
+              trailing: PopupMenuButton<String>(
+                tooltip: label('List actions', 'Thao tác danh sách'),
+                onSelected: (value) => value == 'edit'
+                    ? editor(item: i, kind: 'task_list')
+                    : remove(i),
+                itemBuilder: (_) => [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Text(label('Edit', 'Chỉnh sửa')),
+                  ),
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(label('Delete', 'Xóa')),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ListTile(
+        leading: const Icon(Icons.add),
+        title: Text(label('New list', 'Danh sách mới')),
+        onTap: () => editor(kind: 'task_list'),
+      ),
+    ],
+  );
+
+  Widget taskWorkspace(List<Item> all) => LayoutBuilder(
+    builder: (context, box) {
+      final showLists = box.maxWidth >= 850;
+      inlineDetails = box.maxWidth >= 1100;
+      final active = all
+          .where((i) => i.id == activeTaskId && !i.deleted)
+          .firstOrNull;
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (showLists) ...[
+            SizedBox(width: 230, child: taskOrganization(all)),
+            const VerticalDivider(width: 1),
+          ],
+          Expanded(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      if (!showLists)
+                        Builder(
+                          builder: (context) => IconButton(
+                            tooltip: label(
+                              'Lists and filters',
+                              'Danh sách và bộ lọc',
+                            ),
+                            icon: const Icon(Icons.menu),
+                            onPressed: () => Scaffold.of(context).openDrawer(),
+                          ),
+                        ),
+                      Expanded(
+                        child: Text(
+                          label(
+                            filter,
+                            const {
+                              'All': 'Tất cả',
+                              'Inbox': 'Hộp thư',
+                              'Today': 'Hôm nay',
+                              'Upcoming': 'Sắp tới',
+                              'Completed': 'Hoàn thành',
+                            }[filter]!,
+                          ),
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  QuickTaskEntry(
+                    vietnamese: widget.vietnamese,
+                    onDetails: (title, due, priority, dueAt) => editor(
+                      initialDueAt: dueAt,
+                      initialTitle: title,
+                      initialDue: due,
+                      initialPriority: priority,
+                    ),
+                    onSave: (title, due, priority, dueAt) async {
+                      await repo.save('task', {
+                        'title': title,
+                        'notes': '',
+                        'priority': priority,
+                        'list_id': listId,
+                        'due_date': due,
+                        'due_at': dueAt,
+                        'completed': false,
+                        'is_urgent': false,
+                        'is_important': false,
+                      });
+                    },
+                  ),
+                  tasks(all),
+                ],
+              ),
+            ),
+          ),
+          if (inlineDetails) ...[
+            const VerticalDivider(width: 1),
+            SizedBox(
+              width: 330,
+              child: active == null
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Text(
+                          label(
+                            'Select a task to see its details',
+                            'Chọn công việc để xem chi tiết',
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    )
+                  : TaskDetails(
+                      key: ValueKey(active.id),
+                      item: active,
+                      lists: all.where((i) => i.kind == 'task_list').toList(),
+                      vietnamese: widget.vietnamese,
+                      onSave: (patch) => repo.updateTasks([active.id], patch),
+                      onClose: () => setState(() => activeTaskId = null),
+                    ),
+            ),
+          ],
+        ],
+      );
+    },
+  );
+
+  Widget accountMenu() => PopupMenuButton<String>(
+    tooltip: label('Account and settings', 'Tài khoản và cài đặt'),
+    icon: const CircleAvatar(
+      radius: 16,
+      child: Icon(Icons.person_outline, size: 20),
+    ),
+    onSelected: (value) {
+      if (value == 'theme') {
+        widget.toggleTheme();
+      } else if (value == 'language') {
+        widget.toggleLanguage();
+      } else {
+        logout();
+      }
+    },
+    itemBuilder: (_) => [
+      PopupMenuItem(value: 'theme', child: Text(label('Theme', 'Giao diện'))),
+      const PopupMenuItem(
+        value: 'language',
+        child: Text('English / Tiếng Việt'),
+      ),
+      PopupMenuItem(
+        value: 'logout',
+        child: Text(label('Sign out', 'Đăng xuất')),
+      ),
+    ],
+  );
+
+  Widget utilities(bool attention, int pending) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      IconButton(
+        tooltip: 'Sync: ${widget.status} · $pending pending',
+        onPressed: attention ? showConflicts : widget.sync,
+        icon: Icon(attention ? Icons.warning_amber : Icons.sync),
+      ),
+      accountMenu(),
+    ],
+  );
+
+  Widget tasks(List<Item> all) {
+    final tasks = TaskQuery(
+      view: filter,
+      listId: listId,
+      priority: priorityFilter,
+      sort: taskSort,
+    ).apply(all, DateTime.now());
+    final visibleSelected = tasks
+        .where((i) => selectedTasks.contains(i.id))
+        .toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        const SizedBox(height: 16),
         Wrap(
-          spacing: 8,
+          spacing: 12,
           runSpacing: 8,
-          children: ['All', 'Today', 'Upcoming', 'Completed']
-              .map(
-                (v) => ChoiceChip(
-                  label: Text(v),
-                  selected: filter == v,
-                  onSelected: (_) => setState(() => filter = v),
-                ),
-              )
-              .toList(),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            ChoiceChip(
-              label: Text(label('All lists', 'Mọi danh sách')),
-              selected: listId == null,
-              onSelected: (_) => setState(() => listId = null),
+            DropdownButton<String>(
+              value: taskSort,
+              hint: Text(label('Sort by', 'Sắp xếp')),
+              items: [
+                DropdownMenuItem(
+                  value: 'priority',
+                  child: Text(label('Priority', 'Ưu tiên')),
+                ),
+                DropdownMenuItem(
+                  value: 'due',
+                  child: Text(label('Due date', 'Ngày đến hạn')),
+                ),
+                DropdownMenuItem(
+                  value: 'title',
+                  child: Text(label('Title', 'Tiêu đề')),
+                ),
+                DropdownMenuItem(
+                  value: 'newest',
+                  child: Text(label('Newest first', 'Mới nhất')),
+                ),
+              ],
+              onChanged: (value) => setState(() => taskSort = value!),
             ),
-            ...all
-                .where((i) => i.kind == 'task_list')
-                .map(
-                  (i) => InputChip(
-                    label: Text(i.title),
-                    selected: listId == i.id,
-                    onPressed: () => setState(() => listId = i.id),
-                    onDeleted: () => remove(i),
+            DropdownButton<int>(
+              value: priorityFilter ?? -1,
+              items: [
+                DropdownMenuItem(
+                  value: -1,
+                  child: Text(label('Any priority', 'Mọi mức ưu tiên')),
+                ),
+                ...List.generate(
+                  4,
+                  (p) => DropdownMenuItem(
+                    value: p,
+                    child: Text(
+                      label(
+                        ['No priority', 'Low', 'Medium', 'High'][p],
+                        ['Không ưu tiên', 'Thấp', 'Trung bình', 'Cao'][p],
+                      ),
+                    ),
                   ),
                 ),
-            ActionChip(
-              label: Text(label('New list', 'Danh sách mới')),
-              avatar: const Icon(Icons.add, size: 18),
-              onPressed: () => editor(kind: 'task_list'),
+              ],
+              onChanged: (value) =>
+                  setState(() => priorityFilter = value == -1 ? null : value),
             ),
+            FilterChip(
+              label: Text(label('Select tasks', 'Chọn công việc')),
+              selected: selecting,
+              onSelected: (value) => setState(() {
+                selecting = value;
+                selectedTasks.clear();
+              }),
+            ),
+            Text(label('${tasks.length} tasks', '${tasks.length} công việc')),
           ],
         ),
+        if (selecting)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              TextButton(
+                onPressed: () => setState(() {
+                  if (visibleSelected.length == tasks.length) {
+                    selectedTasks.removeAll(tasks.map((i) => i.id));
+                  } else {
+                    selectedTasks.addAll(tasks.map((i) => i.id));
+                  }
+                }),
+                child: Text(label('Select all', 'Chọn tất cả')),
+              ),
+              TextButton(
+                onPressed: visibleSelected.isEmpty
+                    ? null
+                    : () => perform(() async {
+                        await repo.updateTasks(
+                          visibleSelected.map((i) => i.id),
+                          {'completed': filter != 'Completed'},
+                        );
+                        if (mounted) setState(selectedTasks.clear);
+                      }),
+                child: Text(
+                  filter == 'Completed'
+                      ? label('Reopen selected', 'Mở lại đã chọn')
+                      : label('Complete selected', 'Hoàn thành đã chọn'),
+                ),
+              ),
+              TextButton(
+                onPressed: visibleSelected.isEmpty
+                    ? null
+                    : () => bulkDelete(visibleSelected),
+                child: Text(label('Delete selected', 'Xóa đã chọn')),
+              ),
+            ],
+          ),
         const SizedBox(height: 24),
         if (tasks.isEmpty)
           empty(
@@ -476,7 +857,7 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
             ),
             Icons.check_circle_outline,
           ),
-        ...tasks.map(taskTile),
+        ...tasks.map((item) => taskTile(item, selectable: selecting)),
       ],
     );
   }
@@ -649,7 +1030,7 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
             ),
             Icons.event_available,
           ),
-        ...tasks.map(taskTile),
+        ...tasks.map((item) => taskTile(item, selectable: selecting)),
       ],
     );
   }
@@ -961,7 +1342,10 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     final attention =
         ref.watch(conflictsProvider).asData?.value.isNotEmpty ?? false;
     final items = ref.watch(itemsProvider);
-    final wide = MediaQuery.sizeOf(context).width >= 800;
+    final mobile =
+        defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+    final wide = !mobile;
     return CallbackShortcuts(
       bindings: {
         const SingleActivator(LogicalKeyboardKey.keyN, control: true): () =>
@@ -976,62 +1360,81 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
       child: Focus(
         autofocus: true,
         child: Scaffold(
+          drawer: Drawer(
+            child: SafeArea(
+              child: Column(
+                children: [
+                  const ListTile(
+                    leading: Icon(Icons.spa_outlined),
+                    title: Text('MindFlow'),
+                  ),
+                  Expanded(child: taskOrganization(items.asData?.value ?? [])),
+                  if (mobile) ...[
+                    Wrap(
+                      children: List.generate(
+                        6,
+                        (i) => IconButton(
+                          tooltip: names[i],
+                          icon: Icon(icons[i]),
+                          onPressed: () {
+                            Navigator.of(context).pop();
+                            context.go('/${routes[i]}');
+                          },
+                        ),
+                      ),
+                    ),
+                    utilities(attention, pending),
+                  ],
+                ],
+              ),
+            ),
+          ),
           body: SafeArea(
             child: Row(
               children: [
                 if (wide)
                   SizedBox(
-                    width: 224,
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
+                    width: 64,
+                    child: ColoredBox(
+                      color: Theme.of(context).colorScheme.surfaceContainer,
                       child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          const SizedBox(height: 16),
-                          Row(
-                            children: [
-                              Icon(
-                                Icons.spa_outlined,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                              const SizedBox(width: 10),
-                              Expanded(
-                                child: Text(
-                                  'MindFlow',
-                                  style: Theme.of(context).textTheme.titleLarge
-                                      ?.copyWith(fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                            ],
+                          const SizedBox(height: 12),
+                          const Tooltip(
+                            message: 'MindFlow',
+                            child: Icon(Icons.spa_outlined),
                           ),
-                          const SizedBox(height: 40),
-                          ...List.generate(
-                            6,
-                            (i) => Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: ListTile(
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
+                          const SizedBox(height: 20),
+                          Expanded(
+                            child: SingleChildScrollView(
+                              child: Column(
+                                children: List.generate(
+                                  6,
+                                  (i) => Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 4,
+                                    ),
+                                    child: IconButton(
+                                      tooltip: names[i],
+                                      isSelected: index == i,
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: index == i
+                                            ? Theme.of(
+                                                context,
+                                              ).colorScheme.secondaryContainer
+                                            : null,
+                                      ),
+                                      onPressed: () =>
+                                          context.go('/${routes[i]}'),
+                                      icon: Icon(icons[i]),
+                                    ),
+                                  ),
                                 ),
-                                selected: index == i,
-                                selectedTileColor: Theme.of(
-                                  context,
-                                ).colorScheme.secondaryContainer,
-                                leading: Icon(icons[i]),
-                                title: Text(names[i]),
-                                onTap: () => context.go('/${routes[i]}'),
                               ),
                             ),
                           ),
-                          const Spacer(),
-                          Text(
-                            label(
-                              'A calmer kind of productive.',
-                              'Làm việc nhẹ nhàng hơn.',
-                            ),
-                            style: Theme.of(context).textTheme.bodySmall,
-                          ),
-                          const SizedBox(height: 24),
+                          utilities(attention, pending),
+                          const SizedBox(height: 12),
                         ],
                       ),
                     ),
@@ -1057,39 +1460,15 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                                     ?.copyWith(fontWeight: FontWeight.w600),
                               ),
                             ),
-                            IconButton(
-                              tooltip: label(
-                                'Sync: ${widget.status} · $pending pending',
-                                'Đồng bộ: ${widget.status} · $pending chờ',
-                              ),
-                              onPressed: attention
-                                  ? showConflicts
-                                  : widget.sync,
-                              icon: Icon(
-                                attention ? Icons.warning_amber : Icons.sync,
-                              ),
-                            ),
-                            IconButton(
-                              tooltip: 'Theme',
-                              onPressed: widget.toggleTheme,
-                              icon: const Icon(Icons.brightness_6_outlined),
-                            ),
-                            PopupMenuButton<String>(
-                              tooltip: 'Settings',
-                              onSelected: (v) => v == 'language'
-                                  ? widget.toggleLanguage()
-                                  : logout(),
-                              itemBuilder: (_) => [
-                                const PopupMenuItem(
-                                  value: 'language',
-                                  child: Text('English / Tiếng Việt'),
+                            if (mobile)
+                              Builder(
+                                builder: (context) => IconButton(
+                                  tooltip: label('Menu', 'Menu'),
+                                  icon: const Icon(Icons.menu),
+                                  onPressed: () =>
+                                      Scaffold.of(context).openDrawer(),
                                 ),
-                                PopupMenuItem(
-                                  value: 'logout',
-                                  child: Text(label('Sign out', 'Đăng xuất')),
-                                ),
-                              ],
-                            ),
+                              ),
                           ],
                         ),
                       ),
@@ -1135,25 +1514,27 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         ),
                       Expanded(
                         child: items.when(
-                          data: (all) => SingleChildScrollView(
-                            padding: EdgeInsets.all(wide ? 32 : 16),
-                            child: Align(
-                              alignment: Alignment.topCenter,
-                              child: ConstrainedBox(
-                                constraints: const BoxConstraints(
-                                  maxWidth: 1200,
+                          data: (all) => routes[index] == 'tasks'
+                              ? taskWorkspace(all)
+                              : SingleChildScrollView(
+                                  padding: EdgeInsets.all(wide ? 32 : 16),
+                                  child: Align(
+                                    alignment: Alignment.topCenter,
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxWidth: 1200,
+                                      ),
+                                      child: switch (routes[index]) {
+                                        'matrix' => matrix(all),
+                                        'habits' => habits(all),
+                                        'calendar' => calendar(all),
+                                        'focus' => focus(all),
+                                        'search' => searchPage(all),
+                                        _ => tasks(all),
+                                      },
+                                    ),
+                                  ),
                                 ),
-                                child: switch (routes[index]) {
-                                  'matrix' => matrix(all),
-                                  'habits' => habits(all),
-                                  'calendar' => calendar(all),
-                                  'focus' => focus(all),
-                                  'search' => searchPage(all),
-                                  _ => tasks(all),
-                                },
-                              ),
-                            ),
-                          ),
                           loading: () =>
                               const Center(child: CircularProgressIndicator()),
                           error: (_, _) => Center(
@@ -1172,11 +1553,13 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
               ],
             ),
           ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => editor(),
-            icon: const Icon(Icons.add),
-            label: Text(label('Add task', 'Thêm việc')),
-          ),
+          floatingActionButton: widget.view == 'tasks'
+              ? null
+              : FloatingActionButton.extended(
+                  onPressed: () => editor(),
+                  icon: const Icon(Icons.add),
+                  label: Text(label('Add task', 'Thêm việc')),
+                ),
           bottomNavigationBar: wide
               ? null
               : NavigationBar(

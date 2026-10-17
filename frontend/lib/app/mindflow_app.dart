@@ -34,6 +34,8 @@ class _MindFlowAppState extends State<MindFlowApp> with WidgetsBindingObserver {
   String status = 'offline';
   String? warning;
   bool loading = true;
+  bool storageOpening = false;
+  Object? storageError;
   bool dark = false;
   bool vietnamese = false;
   late final GoRouter router = GoRouter(
@@ -46,6 +48,8 @@ class _MindFlowAppState extends State<MindFlowApp> with WidgetsBindingObserver {
           listenable: changes,
           builder: (context, _) => account == null
               ? LoginPage(auth: auth, onAccount: open)
+              : storageOpening || storageError != null
+              ? storagePage()
               : ProviderScope(
                   overrides: [
                     repositoryProvider.overrideWithValue(repository!),
@@ -76,35 +80,147 @@ class _MindFlowAppState extends State<MindFlowApp> with WidgetsBindingObserver {
   Future<void> restore() async {
     try {
       final saved = await auth.restore();
-      if (saved != null && mounted) open(saved);
+      if (saved != null && mounted) await open(saved);
     } catch (_) {
       warning = 'Secure storage unavailable. Sign in to continue.';
     }
     if (mounted) update(() => loading = false);
   }
 
-  void open(Account value) {
+  Future<void> open(Account value) async {
+    update(() {
+      account = value;
+      loading = false;
+      storageOpening = true;
+      storageError = null;
+      status = 'opening_storage';
+    });
     void persistenceWarning(String message) {
       if (mounted) update(() => warning = message);
     }
 
-    final db =
-        widget.databaseFactory?.call(value.id, persistenceWarning) ??
-        AppDatabase(value.id, persistenceWarning: persistenceWarning);
-    repository = LocalRepository(db);
-    worker = SyncWorker(repository!, value.api, (value) {
-      if (mounted) update(() => status = value);
-    });
-    subscription = repository!.watchPending().listen((_) {
-      debounce?.cancel();
-      debounce = Timer(const Duration(milliseconds: 500), () => worker?.run());
-    });
-    update(() {
-      account = value;
-      loading = false;
-    });
-    worker!.run();
+    AppDatabase? db;
+    try {
+      db =
+          widget.databaseFactory?.call(value.id, persistenceWarning) ??
+          AppDatabase(value.id, persistenceWarning: persistenceWarning);
+      final local = LocalRepository(db);
+      // Verify migrations and a domain read before subscribing or starting sync.
+      await local.watch().first;
+      if (!mounted) {
+        await db.close();
+        return;
+      }
+      repository = local;
+      worker = SyncWorker(local, value.api, (value) {
+        if (mounted) update(() => status = value);
+      });
+      subscription = local.watchPending().listen(
+        (_) {
+          debounce?.cancel();
+          debounce = Timer(
+            const Duration(milliseconds: 500),
+            () => worker?.run(),
+          );
+        },
+        onError: (Object error) {
+          worker?.dispose();
+          debounce?.cancel();
+          if (mounted) {
+            update(() {
+              storageError = error;
+              status = 'storage_unavailable';
+            });
+          }
+        },
+      );
+      update(() => storageOpening = false);
+      unawaited(worker!.run());
+    } catch (error) {
+      // Closing a failed connection does not delete its database or outbox.
+      try {
+        await db?.close();
+      } catch (_) {
+        // Opening errors remain the useful diagnostic.
+      }
+      if (mounted) {
+        update(() {
+          storageOpening = false;
+          storageError = error;
+          status = 'storage_unavailable';
+        });
+      }
+    }
   }
+
+  Future<void> retryStorage() async {
+    final current = account;
+    if (current == null || storageOpening) return;
+    worker?.dispose();
+    debounce?.cancel();
+    await subscription?.cancel();
+    await worker?.run();
+    try {
+      await repository?.db.close();
+    } catch (_) {
+      // Reopen the same account database without clearing browser storage.
+    }
+    repository = null;
+    worker = null;
+    if (mounted) await open(current);
+  }
+
+  Widget storagePage() => Scaffold(
+    body: Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: SizedBox(
+          width: 560,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (storageOpening) ...[
+                const CircularProgressIndicator(),
+                const SizedBox(height: 16),
+                Text(
+                  vietnamese
+                      ? 'Đang mở bộ nhớ cục bộ…'
+                      : 'Opening local storage…',
+                ),
+              ] else ...[
+                const Icon(Icons.storage_outlined, size: 48),
+                const SizedBox(height: 16),
+                Text(
+                  vietnamese
+                      ? 'Không thể mở bộ nhớ cục bộ'
+                      : 'Local storage is unavailable',
+                  style: Theme.of(context).textTheme.headlineSmall,
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  vietnamese
+                      ? 'Đồng bộ đã dừng. Hãy thử lại trên cùng địa chỉ và hồ sơ trình duyệt. Không xóa dữ liệu trang web khi còn thay đổi chưa đồng bộ.'
+                      : 'Sync is paused. Retry using the same browser address and profile. Keep site data to preserve any unsynced changes.',
+                ),
+                const SizedBox(height: 16),
+                FilledButton.icon(
+                  onPressed: retryStorage,
+                  icon: const Icon(Icons.refresh),
+                  label: Text(vietnamese ? 'Thử lại' : 'Retry storage'),
+                ),
+                ExpansionTile(
+                  title: Text(
+                    vietnamese ? 'Chi tiết chẩn đoán' : 'Diagnostic details',
+                  ),
+                  children: [SelectableText(storageError.toString())],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 
   Future<void> close() async {
     worker?.dispose();
@@ -174,7 +290,7 @@ class _MindFlowAppState extends State<MindFlowApp> with WidgetsBindingObserver {
 
 class LoginPage extends StatefulWidget {
   final AuthController auth;
-  final void Function(Account) onAccount;
+  final Future<void> Function(Account) onAccount;
   const LoginPage({super.key, required this.auth, required this.onAccount});
   @override
   State<LoginPage> createState() => _LoginPageState();
@@ -206,7 +322,7 @@ class _LoginPageState extends State<LoginPage> {
         password.text,
         register,
       );
-      if (mounted) widget.onAccount(account);
+      if (mounted) await widget.onAccount(account);
     } catch (_) {
       if (mounted) {
         setState(

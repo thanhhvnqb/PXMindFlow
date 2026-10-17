@@ -1,5 +1,6 @@
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'web_persistence.dart';
 part 'database.g.dart';
 
 class Records extends Table {
@@ -49,12 +50,10 @@ class AppDatabase extends _$AppDatabase {
             sqlite3Wasm: Uri.parse('sqlite3.wasm'),
             driftWorker: Uri.parse('drift_worker.dart.js'),
             onResult: (result) {
-              if (result.missingFeatures.isNotEmpty ||
-                  result.chosenImplementation.name == 'inMemory') {
-                persistenceWarning?.call(
-                  'Browser storage has limited durability: ${result.chosenImplementation.name}. Keep a synced backup.',
-                );
-              }
+              final warning = webPersistenceWarning(
+                result.chosenImplementation,
+              );
+              if (warning != null) persistenceWarning?.call(warning);
             },
           ),
         ),

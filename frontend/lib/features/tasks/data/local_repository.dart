@@ -119,6 +119,26 @@ class LocalRepository {
     });
   }
 
+  /// Read each current row inside one transaction to preserve newer local edits.
+  Future<void> updateTasks(
+    Iterable<String> ids,
+    Map<String, dynamic> changes, {
+    bool delete = false,
+  }) => db.transaction(() async {
+    for (final id in ids.toSet()) {
+      final row = await get('task', id);
+      if (row == null) continue;
+      final payload = jsonDecode(row.payload) as Map<String, dynamic>;
+      if (payload['deleted_at'] != null) continue;
+      await save(
+        'task',
+        {...clean(payload), ...changes},
+        id: id,
+        delete: delete,
+      );
+    }
+  });
+
   static Map<String, dynamic> clean(Map<String, dynamic> data) => Map.from(data)
     ..remove('created_at')
     ..remove('updated_at')

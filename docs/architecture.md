@@ -11,3 +11,5 @@ Initial implementation uses typed Drift envelope/outbox/conflict/state tables an
 Six Flutter platform runners are scaffolded; builds must be verified individually. No remote infrastructure or unrelated legacy modules are introduced.
 
 Dependencies: frontend/pubspec.lock and backend/requirements.lock pin the resolved dependency graph. Backend requirements.txt records direct requirements; container installs the lock. SDK flutter_localizations pins intl 0.20.2. Six-platform CI configuration is provided but has not run during this session.
+
+Account repository overrides live in a nested ProviderScope. The repository is explicitly scoped (`dependencies: []`) and every repository-dependent stream declares that dependency, so domain data, pending counts, conflicts and search resolve inside the account container. Opening verifies local records before sync starts; failures display diagnostic details and allow reopening the same database without resetting its outbox.

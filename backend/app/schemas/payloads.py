@@ -31,10 +31,20 @@ class Task(Named):
     parent_id: str | None = None
     priority: int = Field(default=0, ge=0, le=3)
     due_date: str | None = None
+    due_at: str | None = None
     timezone: str = "Etc/UTC"
     completed: bool = False
     is_urgent: bool = False
     is_important: bool = False
+
+    @field_validator("due_at")
+    @classmethod
+    def due_instant(cls, value):
+        if value is not None:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if parsed.tzinfo is None or parsed.utcoffset().total_seconds() != 0:
+                raise ValueError("due_at must be a UTC instant")
+        return value
 
     @field_validator("list_id", "parent_id")
     @classmethod

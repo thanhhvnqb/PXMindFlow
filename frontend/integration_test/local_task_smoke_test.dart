@@ -40,13 +40,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Add task'));
-    await tester.pumpAndSettle();
     await tester.enterText(
-      find.byType(TextFormField).first,
+      find.byType(TextField).first,
       'Platform storage smoke test',
     );
-    await tester.tap(find.text('Save'));
+    await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
     expect(find.text('Platform storage smoke test'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
