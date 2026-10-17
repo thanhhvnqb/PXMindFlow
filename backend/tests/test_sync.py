@@ -215,3 +215,28 @@ async def test_invalid_types_do_not_become_server_errors(client):
     ]
     results = await push(client, user["access_token"], *invalid)
     assert all(r["status"] == "validation_failure" for r in results)
+
+
+@pytest.mark.asyncio
+async def test_timed_task_survives_push_pull_and_date_only_update(client):
+    user = await account(client)
+    token = user["access_token"]
+    op = mutation(due_date="2026-10-17", due_at="2026-10-17T07:00:00.000Z")
+    result = (await push(client, token, op))[0]
+    assert result["status"] == "applied"
+    page = await pull(client, token)
+    assert page["changes"][0]["record"]["payload"]["due_at"] == "2026-10-17T07:00:00.000Z"
+    update = mutation(entity_id=op["entity_id"], version=1, operation="update", due_date="2026-10-17", due_at=None)
+    assert (await push(client, token, update))[0]["status"] == "applied"
+    page = await pull(client, token, cursor=page["next_cursor"])
+    assert page["changes"][0]["record"]["payload"]["due_at"] is None
+
+
+def test_task_due_at_requires_utc():
+    from pydantic import ValidationError
+    from app.schemas.payloads import Task
+
+    for value in ["invalid", "2026-10-17T14:00:00", "2026-10-17T14:00:00+07:00"]:
+        with pytest.raises(ValidationError):
+            Task(title="Timed", due_at=value)
+    assert Task(title="Date only").due_at is None

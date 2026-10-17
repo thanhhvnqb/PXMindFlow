@@ -1,4 +1,4 @@
-# Implementation status — 2026-10-13
+# Implementation status — 2026-10-15
 
 An executable incremental foundation is implemented; the full MVP and mandatory sync recovery matrix are not complete.
 
@@ -23,7 +23,11 @@ See testing.md for commands and coverage. Backend: nine API tests; fresh migrati
 3. Recurrence rules, stable occurrence completion/exception records and timezone/DST tests. Recurrence is unavailable rather than silently cloning tasks. Calendar day/week/month task grid, dated quick-create and timed deadlines.
 4. Habit schedule/target editing, IANA user timezone selection, local-day DST/travel behavior, streak/progress/history views. Current habits deliberately label their UTC-day limitation.
 5. Focus daily totals, linked tasks, preference persistence, automatic break cycles, richer statistics and background notification handling. Cold-start recovery after changed system clocks remains bounded approximation.
-6. Full ARB-based EN/VI coverage (many strings still English), bulk task actions, sorting controls, search filters, accessibility audit, original launcher icons, packaging, performance/load testing and platform runtime smoke tests.
+6. Full ARB-based EN/VI coverage (many strings still English), bulk task move/scheduling, search filters, accessibility audit, original launcher icons, packaging, performance/load testing and platform runtime smoke tests.
 7. Production HTTPS/reverse-proxy configuration, per-account auth abuse limits, refresh-family reuse policy, uniform structured errors, auth-counter cleanup, signing and secrets/deployment operations. This development foundation is not ready for public production deployment.
 
 Browser durability is not guaranteed. Configuration of six CI builds is not a claim that those builds passed. Existing user modifications to AGENTS.md and .agents were preserved.
+
+## Task organization increment — 2026-10-15
+
+Added Inbox, exact priority filtering, deterministic priority/date/title/newest sorting, visible result count and selection mode with select-all, complete/reopen and confirmed bulk tombstone deletion. Repository bulk writes preserve current payloads and atomically queue every mutation. English/Vietnamese labels and compact wrapping follow MindFlow's existing original teal design. Task query/repository tests and the shell workflow cover the added behavior. Full MVP gaps above remain open.

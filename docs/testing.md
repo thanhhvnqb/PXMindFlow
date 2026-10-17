@@ -1,5 +1,24 @@
 # Verification
 
+## Account provider scope repair, 2026-10-15
+
+- Reproduced the screenshot's generic storage error in an app-level widget test with a task saved before login. The underlying exception was `Bad state: Account repository required`: dependent providers resolved from the root container rather than the nested account override.
+- Declared repository scoping and dependencies for items, pending count, conflicts and search. The regression fails before this provider fix and passes afterward.
+- Added storage readiness before sync, a recoverable storage error page with diagnostic details, and same-account retry without clearing data. Regression verifies an unsent task/outbox survive a failed opening and retry.
+- `flutter analyze`: no issues. `flutter test`: 20 passed, one real HTTP test skipped without TEST_API_URL.
+- Separate headless Chromium 143 browser probes using the actual AppDatabase saved and reopened a unique SQLite database with both shared IndexedDB and OPFS locks (cross-origin isolated server). These verify SQLite/WASM runtime behavior, not end-to-end login or the workstation SSH tunnel. Browser tools and extracted runtime libraries were confined to ignored frontend/.dart_tool; no system packages installed.
+- No backend/schema changes. The backend's nine tests and migration checks passed earlier in this work session.
+- Final `flutter build web --dart-define=API_URL=http://localhost:8000/api/v1`: passed including WASM dry run. Restarted the loopback Web development server on port 8080 from /home/thanh/pxmindflow-lumpfish/frontend; HTTP GET returned 200. Workstation browser reload remains unverified.
+
+## Task organization refinement, 2026-10-15
+
+- `flutter analyze`: no issues. `flutter test`: 19 passed; one real HTTP integration test skipped without TEST_API_URL.
+- Extended shell workflow verifies selection, bulk reopening and Inbox; targeted widget rerun passed both tests. All six views still fit 360px at 1.3 text scale.
+- New query tests cover Inbox, overdue Today, Upcoming, Completed, priority/list intersection and undated-last sorting. SQLite bulk tests verify preserving notes, deduplicated selection, one outbox mutation per task, tombstones and skipping deleted records.
+- `flutter build web --dart-define=API_URL=http://localhost:8000/api/v1`: passed, including WASM dry run.
+- `scripts/test_backend.sh`: isolated migrations, Alembic schema check and all nine backend tests passed; test containers/network removed. Development database was untouched.
+- `git diff --check`: passed. No schema/API changes. Browser/tunnel, platform integration smoke tests and Android/iOS/Windows/macOS/Linux builds were not run.
+
 ## Login navigation repair, 2026-10-15
 
 - API logs confirmed successful login and pull responses while the login page remained visible. Router refresh alone did not rebuild the route content after account state changed. The route now listens directly to app state changes, updating the login/task shell and shell status.
@@ -56,3 +75,29 @@ Coverage: atomic rollback; disk reopen while offline; queued create/edit/delete 
 Missing required matrix cases: recurring occurrence completion, tombstone cleanup/stale-device resync after expiration (cleanup disabled), device revocation, crash injection at every transaction boundary, full concurrent push/pull/page-overlap combinations, browser eviction, timezone/DST habits. Therefore synchronization is a tested foundation, not the completed mandatory recovery matrix.
 
 Tests deliberately open separate database executors to simulate devices; Drift emits a debug warning about multiple instances. They do not share an executor or account file. No tests or diagnostics are disabled.
+
+Task workspace regression checks cover the persistent rail at 500 px on desktop, three-column availability at 1400 px, the organization drawer, local task creation/completion and bulk reopening, and all six mobile views at 360 px with 1.3x text. `flutter analyze` and `flutter test` pass (20 tests, one API integration test skipped without TEST_API_URL). Native platform builds and workstation SSH-tunnel manual testing were not performed for this layout change.
+
+The Web release build also passes with `flutter build web --dart-define=API_URL=http://localhost:8000/api/v1`. Additional widget assertions verify selecting task details and finding account/sync actions in the mobile drawer.
+
+Web startup regression (2026-10-15): headless Chromium against the loopback debug server in this checkout rendered the Sign in screen, removed the loading overlay after the first frame, and reloaded successfully. Blocking `www.gstatic.com` still rendered the app with CanvasKit JS/WASM loaded from port 8080. Blocking local CanvasKit instead displayed the retry action. This uses a fresh automation profile and does not establish that an existing workstation profile or its SSH tunnel was tested. Browser tooling and shared libraries were installed/extracted only in the ignored project-local `.browser-check/` directory.
+
+## Browser storage warning correction, 2026-10-17
+
+- Removed the false warning for shared IndexedDB caused by treating every missing optional browser API as degraded persistence. Selected unsafe IndexedDB and in-memory modes retain specific, actionable warnings. Existing database names, data and outbox are unchanged.
+- Added regression coverage for all five Drift storage modes.
+- `flutter analyze`: passed. `flutter test`: 23 passed, one API integration test skipped without TEST_API_URL. `git diff --check`: passed.
+- No backend/schema changes; backend checks and native builds were not rerun. Workstation browser/SSH tunnel verification was not performed.
+- `flutter build web --dart-define=API_URL=http://localhost:8000/api/v1`: passed, including WASM dry run.
+
+### Task entry controls (2026-10-17)
+
+`flutter analyze` passes. The frontend suite passes (23 tests, one API integration test skipped without `TEST_API_URL`); the added task-controls widget test also passes. It exercises date/priority selection, failed-write draft retention and successful retry. The shell widget test now creates a canonical task through inline Enter submission and verifies its outbox plus completion/bulk flows. No backend or schema changes were made; backend tests/migration checks were not rerun for this UI increment. Manual workstation tunnel testing and native platform builds are not verified in this increment.
+
+Web release compilation also passes with `flutter build web --dart-define=API_URL=http://localhost:8000/api/v1` (including the SDK's Wasm compatibility dry run). This is compilation evidence, not browser persistence or workstation tunnel verification.
+
+### Timed tasks and direct details editing (2026-10-17)
+
+`flutter analyze` passes; `flutter test` passes 26 tests (one external API integration test skipped without `TEST_API_URL`). Tests cover selecting time as UTC, removing time without removing its day, draft retention/retry and editing notes directly into the SQLite/outbox flow. `flutter build web --no-wasm-dry-run --dart-define=API_URL=http://localhost:8000/api/v1` passes. The Linux integration smoke test was attempted but cannot build because CMake is absent; no system packages were installed. Android/iOS/Windows/macOS builds and manual workstation browser/tunnel tests were not performed.
+
+`scripts/test_backend.sh` passes all 11 PostgreSQL API tests, including timed-task push/pull, removal of time and rejection of non-UTC/naive timestamps. Alembic upgrade and schema check pass (`No new upgrade operations detected`). Tests use the script's disposable isolated Compose project; the existing `pxmindflow` development database is untouched.

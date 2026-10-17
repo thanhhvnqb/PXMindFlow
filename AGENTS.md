@@ -44,6 +44,14 @@
 
 - **Security:** user accounts and per-user tenant isolation, secure password hashing, short-lived access tokens and refresh-token rotation/revocation (or well-reviewed equivalent); HTTPS in deployment; never expose PostgreSQL credentials to Flutter; every API query and mutation must be scoped to authenticated user.
 
+### Dependency selection policy
+
+- Prefer Flutter/Dart SDK features and official packages when they adequately meet the requirement. Keep third-party dependencies to the minimum needed; the approved stack above remains authorized.
+- Use established, widely adopted third-party dependencies with a substantial user base and evidence of ongoing maintenance. Before adding a dependency, check its publisher/source repository, adoption, release and issue activity, documentation, license, security considerations, and compatibility with the required platforms. Popularity alone does not establish safety, and frequent releases are not required for a mature, stable package.
+- Unfamiliar, niche, new, or little-used dependencies, and packages whose adoption or maintenance cannot be established, require a thorough discussion with the user and explicit agreement **before installation or use**. Present the concrete need, evidence available, alternatives (including official packages or existing code), maintenance/security/platform risks, transitive dependencies, and the cost of replacing the package later. Do not silently introduce such packages through tooling, plugins, or copied code.
+- Review newly introduced transitive dependencies when adding or upgrading packages. Apply the same discussion requirement to unfamiliar dependencies identified in that review; existing locked dependencies do not require repeated approval solely because this policy was added.
+- Pin resolved versions in lockfiles and validate upgrades with relevant tests. Do not claim that any package is guaranteed to receive periodic updates or indefinite support.
+
 ## 3. Repository layout
 
 ```text
