@@ -13,8 +13,6 @@ services:
     build: ./backend
     image: mindflow-test-api
     working_dir: /app
-    volumes:
-      - ./backend:/app:ro
     environment:
       DATABASE_URL: postgresql+asyncpg://mindflow_test:${TEST_DB_PASSWORD}@db/mindflow_test
       JWT_SECRET: ${TEST_JWT_SECRET:?Set ephemeral TEST_JWT_SECRET}
