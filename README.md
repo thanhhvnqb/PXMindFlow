@@ -36,6 +36,9 @@ Check `docker compose ls -a` before changing project names. Startup must use
 `up --build` after Dockerfile/source changes: an old image may still have
 `python3` as its command and exit successfully without starting the API.
 Inspect `docker compose -p pxmindflow ps -a` and logs when diagnosing startup.
+If Uvicorn reports `Could not import module "app.main"`, rebuild the API image.
+The Dockerfile assigns copied source to the non-root runtime user so owner-only
+worktree permissions do not prevent imports. Do not reset the database volume.
 Run `alembic upgrade head` after startup; `/health` alone does not check the schema.
 
 ## Current implementation quick-start

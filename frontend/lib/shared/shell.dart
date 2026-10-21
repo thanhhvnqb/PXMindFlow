@@ -58,7 +58,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
   ];
   String? activeTaskId;
   bool inlineDetails = false;
-  String filter = 'All';
+  String filter = 'Inbox';
+  final collapsedSections = <String>{};
   String search = '';
   String taskSort = 'priority';
   int? priorityFilter;
@@ -573,87 +574,149 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
       ),
     ),
   );
-  Widget taskOrganization(List<Item> all) => ListView(
-    padding: const EdgeInsets.all(12),
-    children: [
-      Padding(
-        padding: const EdgeInsets.all(12),
-        child: Text(
-          label('My tasks', 'Công việc của tôi'),
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-      ),
-      ...['All', 'Inbox', 'Today', 'Upcoming', 'Completed'].map(
-        (view) => ListTile(
-          dense: true,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
-          ),
-          selected: filter == view && listId == null,
-          selectedTileColor: Theme.of(context).colorScheme.secondaryContainer,
-          leading: Icon(
-            const {
-              'All': Icons.layers_outlined,
-              'Inbox': Icons.inbox_outlined,
-              'Today': Icons.today_outlined,
-              'Upcoming': Icons.date_range_outlined,
-              'Completed': Icons.task_alt,
-            }[view],
-          ),
-          title: Text(
-            label(
-              view,
-              const {
-                'All': 'Tất cả',
-                'Inbox': 'Hộp thư',
-                'Today': 'Hôm nay',
-                'Upcoming': 'Sắp tới',
-                'Completed': 'Hoàn thành',
-              }[view]!,
+  void selectTaskView(String view) => setState(() {
+    filter = view;
+    listId = null;
+    projectId = null;
+    tagId = null;
+  });
+
+  Widget organizationSection(String title, String kind, List<Item> all) {
+    final collapsed = collapsedSections.contains(kind);
+    final archived = kind == 'tag' ? showArchivedTags : includeArchived;
+    final organization = Organization(all);
+    final entries = all.where(
+      (i) =>
+          i.kind == kind &&
+          !i.deleted &&
+          (archived || !organization.archived(i)) &&
+          (kind != 'project' || listId == null || i.data['space_id'] == listId),
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  collapsed ? Icons.chevron_right : Icons.expand_more,
+                  size: 18,
+                ),
+                minLeadingWidth: 0,
+                title: Text(
+                  title,
+                  style: Theme.of(context).textTheme.labelMedium,
+                ),
+                onTap: () => setState(() {
+                  if (collapsed) {
+                    collapsedSections.remove(kind);
+                  } else {
+                    collapsedSections.add(kind);
+                  }
+                }),
+              ),
             ),
-          ),
-          onTap: () => setState(() {
-            filter = view;
-            listId = null;
-            projectId = null;
-          }),
+            PopupMenuButton<String>(
+              tooltip: '$title ${label('options', 'tùy chọn')}',
+              icon: const Icon(Icons.more_horiz, size: 18),
+              onSelected: (value) {
+                if (value == 'archive') {
+                  setState(() {
+                    if (kind == 'tag') {
+                      showArchivedTags = !showArchivedTags;
+                      tagId = null;
+                    } else {
+                      includeArchived = !includeArchived;
+                      listId = null;
+                      projectId = null;
+                    }
+                  });
+                } else {
+                  setState(() {
+                    listId = null;
+                    projectId = null;
+                    tagId = null;
+                    filter = 'All';
+                  });
+                }
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'all',
+                  child: Text(label('Show all', 'Hiện tất cả')),
+                ),
+                PopupMenuItem(
+                  value: 'archive',
+                  child: Semantics(
+                    checked: archived,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            label('Show archived', 'Hiện mục lưu trữ'),
+                          ),
+                        ),
+                        const SizedBox(width: 16),
+                        SizedBox(
+                          width: 24,
+                          child: archived ? const Icon(Icons.check) : null,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            IconButton(
+              tooltip: '${label('Add', 'Thêm')} $title',
+              icon: const Icon(Icons.add, size: 18),
+              onPressed: () => editor(kind: kind),
+            ),
+          ],
         ),
-      ),
-      const Divider(height: 32),
-      ListTile(
-        dense: true,
-        title: Text(label('All Spaces', 'Mọi không gian')),
-        selected: listId == null,
-        onTap: () => setState(() {
-          listId = null;
-          projectId = null;
-        }),
-      ),
-      ...all
-          .where(
-            (i) =>
-                i.kind == 'task_list' &&
-                (includeArchived || !Organization(all).archived(i)),
-          )
-          .map(
+        if (!collapsed)
+          ...entries.map(
             (i) => ListTile(
               dense: true,
-              leading: const Icon(Icons.list_alt_outlined),
+              contentPadding: const EdgeInsets.only(left: 8),
+              leading: Icon(
+                kind == 'tag'
+                    ? Icons.sell_outlined
+                    : kind == 'project'
+                    ? Icons.work_outline
+                    : Icons.list_alt_outlined,
+                size: 18,
+              ),
+              minLeadingWidth: 20,
               title: Text(
                 i.title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              selected: listId == i.id,
+              selected: kind == 'tag'
+                  ? tagId == i.id
+                  : kind == 'project'
+                  ? projectId == i.id
+                  : listId == i.id,
               onTap: () => setState(() {
-                listId = i.id;
-                projectId = null;
-                filter = 'All';
+                if (kind == 'tag') {
+                  tagId = tagId == i.id ? null : i.id;
+                  if (filter == 'Notes') filter = 'All';
+                } else {
+                  listId = kind == 'task_list' ? i.id : null;
+                  projectId = kind == 'project' ? i.id : null;
+                  filter = 'All';
+                  tagId = null;
+                }
               }),
               trailing: PopupMenuButton<String>(
-                tooltip: label('Space actions', 'Thao tác không gian'),
+                tooltip: '${i.title} ${label('options', 'tùy chọn')}',
+                icon: const Icon(Icons.more_horiz, size: 18),
                 onSelected: (value) => value == 'edit'
-                    ? editor(item: i, kind: 'task_list')
+                    ? editor(item: i, kind: kind)
                     : perform(() => archive(i)),
                 itemBuilder: (_) => [
                   PopupMenuItem(
@@ -672,84 +735,80 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
               ),
             ),
           ),
-      ListTile(
-        leading: const Icon(Icons.add),
-        title: Text(label('New Space', 'Không gian mới')),
-        onTap: () => editor(kind: 'task_list'),
-      ),
-      SwitchListTile(
-        title: Text(label('Include archived', 'Hiện mục lưu trữ')),
-        value: includeArchived,
-        onChanged: (v) => setState(() => includeArchived = v),
-      ),
-      ...all
-          .where(
-            (i) =>
-                i.kind == 'project' &&
-                (listId == null || i.data['space_id'] == listId) &&
-                (includeArchived || !Organization(all).archived(i)),
-          )
-          .map(
-            (i) => ListTile(
-              leading: const Icon(Icons.work_outline),
-              title: Text(i.title),
-              subtitle: Text(i.data['status'] as String? ?? 'active'),
-              selected: projectId == i.id,
-              onTap: () => setState(() {
-                projectId = i.id;
-                listId = null;
-                filter = 'All';
-              }),
-              trailing: IconButton(
-                icon: const Icon(Icons.more_horiz),
-                tooltip: label('Project details', 'Chi tiết dự án'),
-                onPressed: () => editor(item: i, kind: 'project'),
+      ],
+    );
+  }
+
+  Widget taskOrganization(List<Item> all) => ListView(
+    padding: const EdgeInsets.all(12),
+    children: [
+      Row(
+        children: [
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Text(
+                label('My tasks', 'Công việc của tôi'),
+                style: Theme.of(context).textTheme.titleMedium,
               ),
             ),
           ),
-      ListTile(
-        leading: const Icon(Icons.add),
-        title: Text(label('New Project', 'Dự án mới')),
-        onTap: () => editor(kind: 'project'),
-      ),
-      const Divider(),
-      SwitchListTile(
-        title: Text(label('Show archived tags', 'Hiện nhãn lưu trữ')),
-        value: showArchivedTags,
-        onChanged: (v) => setState(() {
-          showArchivedTags = v;
-          tagId = null;
-        }),
-      ),
-      ListTile(
-        title: Text(label('All tags', 'Mọi nhãn')),
-        selected: tagId == null,
-        onTap: () => setState(() => tagId = null),
-      ),
-      ...all
-          .where(
-            (i) =>
-                i.kind == 'tag' &&
-                (showArchivedTags || i.data['archived_at'] == null),
-          )
-          .map(
-            (i) => ListTile(
-              leading: const Icon(Icons.tag),
-              title: Text(i.title),
-              selected: tagId == i.id,
-              onTap: () => setState(() => tagId = i.id),
-              trailing: IconButton(
-                icon: const Icon(Icons.more_horiz),
-                tooltip: label('Tag details', 'Chi tiết nhãn'),
-                onPressed: () => editor(item: i, kind: 'tag'),
+          PopupMenuButton<String>(
+            tooltip: label('Task view options', 'Tùy chọn công việc'),
+            icon: const Icon(Icons.more_horiz, size: 18),
+            onSelected: selectTaskView,
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'All',
+                child: Text(label('All tasks', 'Tất cả công việc')),
               ),
+              PopupMenuItem(
+                value: 'Completed',
+                child: Text(label('Completed', 'Hoàn thành')),
+              ),
+            ],
+          ),
+        ],
+      ),
+      ...['Today', 'Next 7 days', 'Inbox', 'Notes'].map(
+        (view) => ListTile(
+          dense: true,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(10),
+          ),
+          selected:
+              filter == view &&
+              listId == null &&
+              projectId == null &&
+              tagId == null,
+          selectedTileColor: Theme.of(context).colorScheme.secondaryContainer,
+          leading: Icon(
+            const {
+              'Today': Icons.today_outlined,
+              'Next 7 days': Icons.date_range_outlined,
+              'Inbox': Icons.inbox_outlined,
+              'Notes': Icons.description_outlined,
+            }[view],
+            size: 18,
+          ),
+          title: Text(
+            label(
+              view,
+              const {
+                'Today': 'Hôm nay',
+                'Next 7 days': '7 ngày tới',
+                'Inbox': 'Hộp thư',
+                'Notes': 'Ghi chú',
+              }[view]!,
             ),
           ),
-      ListTile(
-        leading: const Icon(Icons.add),
-        title: Text(label('New Tag', 'Nhãn mới')),
-        onTap: () => editor(kind: 'tag'),
+          onTap: () => selectTaskView(view),
+        ),
       ),
+      const Divider(height: 24),
+      organizationSection(label('Spaces', 'Không gian'), 'task_list', all),
+      organizationSection(label('Projects', 'Dự án'), 'project', all),
+      organizationSection(label('Tags', 'Nhãn'), 'tag', all),
     ],
   );
 
@@ -795,6 +854,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                               'Inbox': 'Hộp thư',
                               'Today': 'Hôm nay',
                               'Upcoming': 'Sắp tới',
+                              'Next 7 days': '7 ngày tới',
+                              'Notes': 'Ghi chú',
                               'Completed': 'Hoàn thành',
                             }[filter]!,
                           ),
@@ -804,30 +865,33 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  QuickTaskEntry(
-                    vietnamese: widget.vietnamese,
-                    onDetails: (title, due, priority, dueAt) => editor(
-                      initialDueAt: dueAt,
-                      initialTitle: title,
-                      initialDue: due,
-                      initialPriority: priority,
+                  if (filter != 'Notes')
+                    QuickTaskEntry(
+                      vietnamese: widget.vietnamese,
+                      onDetails: (title, due, priority, dueAt) => editor(
+                        initialDueAt: dueAt,
+                        initialTitle: title,
+                        initialDue: due,
+                        initialPriority: priority,
+                      ),
+                      onSave: (title, due, priority, dueAt) async {
+                        await repo.save('task', {
+                          'title': title,
+                          'notes': '',
+                          'priority': priority,
+                          'list_id': projectId == null ? listId : null,
+                          'project_id': projectId,
+                          'due_date': due,
+                          'due_at': dueAt,
+                          'completed': false,
+                          'is_urgent': false,
+                          'is_important': false,
+                        });
+                      },
                     ),
-                    onSave: (title, due, priority, dueAt) async {
-                      await repo.save('task', {
-                        'title': title,
-                        'notes': '',
-                        'priority': priority,
-                        'list_id': projectId == null ? listId : null,
-                        'project_id': projectId,
-                        'due_date': due,
-                        'due_at': dueAt,
-                        'completed': false,
-                        'is_urgent': false,
-                        'is_important': false,
-                      });
-                    },
-                  ),
-                  if (listId != null || projectId != null) ...[
+                  if (filter == 'Notes' ||
+                      listId != null ||
+                      projectId != null) ...[
                     Row(
                       children: [
                         Expanded(child: Text(label('Notes', 'Ghi chú'))),
@@ -842,9 +906,10 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                       (i) =>
                           i.kind == 'note' &&
                           (includeArchived || !Organization(all).archived(i)) &&
-                          (projectId != null
-                              ? i.data['project_id'] == projectId
-                              : i.data['list_id'] == listId),
+                          (filter == 'Notes' ||
+                              (projectId != null
+                                  ? i.data['project_id'] == projectId
+                                  : i.data['list_id'] == listId)),
                     ))
                       Card(
                         child: ListTile(
@@ -867,7 +932,7 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         ),
                       ),
                   ],
-                  tasks(all),
+                  if (filter != 'Notes') tasks(all),
                 ],
               ),
             ),
@@ -934,17 +999,71 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     ],
   );
 
-  Widget utilities(bool attention, int pending) => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      IconButton(
-        tooltip: 'Sync: ${widget.status} · $pending pending',
-        onPressed: attention ? showConflicts : widget.sync,
-        icon: Icon(attention ? Icons.warning_amber : Icons.sync),
+  Widget syncButton(bool attention, int pending, int taskConflicts) {
+    final failed =
+        attention ||
+        ['offline', 'attention', 'sign_in_required'].contains(widget.status);
+    return IconButton(
+      tooltip:
+          '${label('Sync', 'Đồng bộ')}: ${widget.status == 'sign_in_required' ? label('Sign in required', 'Cần đăng nhập lại') : widget.status} · '
+          '$pending ${label('pending', 'chờ đồng bộ')}'
+          '${taskConflicts > 0 ? ' · $taskConflicts ${label('task conflicts', 'công việc xung đột')}' : ''}',
+      color: failed ? Theme.of(context).colorScheme.error : null,
+      onPressed: attention
+          ? showConflicts
+          : widget.status == 'sign_in_required'
+          ? showSyncAuthentication
+          : widget.sync,
+      icon: Badge(
+        isLabelVisible: taskConflicts > 0,
+        label: Text('$taskConflicts'),
+        backgroundColor: Theme.of(context).colorScheme.error,
+        textColor: Theme.of(context).colorScheme.onError,
+        child: Icon(
+          widget.status == 'sign_in_required'
+              ? Icons.sync_problem_outlined
+              : widget.status == 'syncing'
+              ? Icons.sync
+              : Icons.cloud_sync_outlined,
+        ),
       ),
-      accountMenu(),
-    ],
-  );
+    );
+  }
+
+  Future<void> showSyncAuthentication() async {
+    final signIn = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(label('Sign in to sync', 'Đăng nhập lại để đồng bộ')),
+        content: Text(
+          label(
+            'Your session could not be renewed. Sign in again to resume sync. '
+                'Your local data and pending changes will be retained for this account.',
+            'Không thể gia hạn phiên đăng nhập. Hãy đăng nhập lại để tiếp tục đồng bộ. '
+                'Dữ liệu cục bộ và các thay đổi chưa đồng bộ của tài khoản này sẽ được giữ lại.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(label('Cancel', 'Hủy')),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(context, false);
+              widget.sync();
+            },
+            child: Text(label('Retry sync', 'Thử đồng bộ lại')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(label('Sign in again', 'Đăng nhập lại')),
+          ),
+        ],
+      ),
+    );
+    if (signIn == true && mounted) await widget.logout();
+  }
 
   Widget tasks(List<Item> all) {
     final tasks = TaskQuery(
@@ -1642,8 +1761,13 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
   Widget build(BuildContext context) {
     final index = routes.indexOf(widget.view).clamp(0, 5);
     final pending = ref.watch(pendingProvider).asData?.value ?? 0;
-    final attention =
-        ref.watch(conflictsProvider).asData?.value.isNotEmpty ?? false;
+    final conflicts = ref.watch(conflictsProvider).asData?.value ?? [];
+    final attention = conflicts.isNotEmpty;
+    final taskConflicts = conflicts
+        .where((conflict) => conflict.kind == 'task')
+        .map((conflict) => conflict.entityId)
+        .toSet()
+        .length;
     final items = ref.watch(itemsProvider);
     final mobile =
         defaultTargetPlatform == TargetPlatform.android ||
@@ -1686,7 +1810,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                         ),
                       ),
                     ),
-                    utilities(attention, pending),
+                    syncButton(attention, pending, taskConflicts),
+                    accountMenu(),
                   ],
                 ],
               ),
@@ -1736,7 +1861,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                               ),
                             ),
                           ),
-                          utilities(attention, pending),
+                          syncButton(attention, pending, taskConflicts),
+                          accountMenu(),
                           const SizedBox(height: 12),
                         ],
                       ),
@@ -1745,66 +1871,37 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                 Expanded(
                   child: Column(
                     children: [
-                      Padding(
-                        padding: EdgeInsets.fromLTRB(
-                          wide ? 32 : 16,
-                          20,
-                          16,
-                          12,
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Text(
-                                names[index],
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineMedium
-                                    ?.copyWith(fontWeight: FontWeight.w600),
-                              ),
-                            ),
-                            if (mobile)
-                              Builder(
-                                builder: (context) => IconButton(
-                                  tooltip: label('Menu', 'Menu'),
-                                  icon: const Icon(Icons.menu),
-                                  onPressed: () =>
-                                      Scaffold.of(context).openDrawer(),
+                      if (widget.view != 'tasks')
+                        Padding(
+                          padding: EdgeInsets.fromLTRB(
+                            wide ? 32 : 16,
+                            20,
+                            16,
+                            12,
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  names[index],
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .headlineMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
                                 ),
                               ),
-                          ],
+                              if (mobile)
+                                Builder(
+                                  builder: (context) => IconButton(
+                                    tooltip: label('Menu', 'Menu'),
+                                    icon: const Icon(Icons.menu),
+                                    onPressed: () =>
+                                        Scaffold.of(context).openDrawer(),
+                                  ),
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 24),
-                        child: Row(
-                          children: [
-                            Icon(
-                              widget.status == 'synced'
-                                  ? Icons.cloud_done_outlined
-                                  : Icons.cloud_off_outlined,
-                              size: 16,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '${widget.status} · $pending ${label('pending', 'chờ đồng bộ')}',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                            ),
-                            if (widget.status == 'sign_in_required')
-                              TextButton(
-                                onPressed: logout,
-                                child: const Text('Sign in again'),
-                              ),
-                            if (attention)
-                              TextButton(
-                                onPressed: showConflicts,
-                                child: const Text('Resolve conflicts'),
-                              ),
-                          ],
-                        ),
-                      ),
                       if (widget.warning != null)
                         MaterialBanner(
                           content: Text(widget.warning!),

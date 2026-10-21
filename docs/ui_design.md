@@ -8,7 +8,7 @@ Task organization uses a vertical list of views and projects, a compact sorting/
 
 ## Task workspace and adaptive navigation
 
-Desktop platforms retain a 64 px icon rail at every window width, with sync and the account menu at the bottom. Android/iOS (including their web platform classification) retain six bottom destinations; the left drawer contains task organization, feature shortcuts, sync, theme, language and account actions. Notification infrastructure is not implemented, so no nonfunctional notification button is added.
+Desktop platforms retain a 64 px icon rail at every window width, with the account menu at the bottom. Android/iOS (including their web platform classification) retain six bottom destinations; the left drawer contains task organization, feature shortcuts, theme, language and account actions. Notification infrastructure is not implemented, so no nonfunctional notification button is added.
 
 The task workspace has three content columns beside the rail: organization (230 px), task list (flexible), and selected task details (330 px). At available widths below 1100 px details use the existing task editor dialog; below 850 px organization opens in the left drawer. Each column scrolls independently. Add task sits above the task list and opens the validated local-first editor. Sorting, priority filtering and bulk actions remain available. Domain persistence and sync are unchanged.
 
@@ -25,3 +25,12 @@ Inherited tags expand on demand with their source. Space/Project/Tag editors
 separate archive from project status. Include-archived and archived-tag controls
 keep old work discoverable and restorable. New Projects require a Space; task
 quick entry still works in Inbox with no organization setup.
+
+The sync icon sits next to the profile controls in the desktop rail and mobile drawer, without a status/pending text row. Tasks omits the top page header to maximize workspace height; other screens retain their page headers. Tasks keeps its organization drawer trigger in the task toolbar. Normal sync uses the default icon color; offline, sign-in required and conflicts use error red. A badge counts distinct conflicting tasks. The tooltip retains status and pending details. Clicking opens conflicts, sign-in recovery, or manual sync as appropriate.
+
+The organization sidebar exposes Today, Next 7 days, Inbox and Notes. Spaces,
+Projects and Tags each have a collapsible heading and an overflow menu for Show all and Show archived, plus a separate + button to the right for creation. Archive visibility uses a trailing checkmark. Archived records remain hidden initially. Record
+editing and archive/restore actions use row overflow menus. All tasks and
+Completed remain accessible through My tasks overflow. Notes projects existing
+canonical note records; creation still requires a Space or Project in the editor.
+Next 7 days covers today through six days later using local calendar dates.

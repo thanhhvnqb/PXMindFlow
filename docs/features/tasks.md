@@ -30,3 +30,5 @@ subtask creation use the canonical local records. See [organization](organizatio
 
 Task notes now share the [Markdown editor](notes.md) with independent Space and
 project notes. Original source text remains the persisted and synchronized value.
+
+Sidebar quick views are Today, Next 7 days (today plus six local calendar days), Inbox and Notes. All tasks and Completed live in the My tasks overflow menu. Organization sections collapse independently; creation uses a + button to the right of each section overflow menu; archive visibility remains in the menu with a trailing checkmark.

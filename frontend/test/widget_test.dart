@@ -10,6 +10,69 @@ import 'package:mindflow/features/tasks/data/local_repository.dart';
 import 'package:mindflow/shared/shell.dart';
 
 void main() {
+  testWidgets(
+    'expired sync session explains recovery and retains account data',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      tester.view.physicalSize = const Size(1400, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final db = AppDatabase.testing(NativeDatabase.memory());
+      final repository = LocalRepository(db);
+      var syncs = 0;
+      var logouts = 0;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [repositoryProvider.overrideWithValue(repository)],
+          child: MaterialApp(
+            home: MindFlowShell(
+              view: 'tasks',
+              status: 'sign_in_required',
+              sync: () {
+                syncs++;
+              },
+              logout: () async {
+                logouts++;
+              },
+              toggleTheme: () {},
+              toggleLanguage: () {},
+              vietnamese: false,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final sync = find.byTooltip('Sync: Sign in required · 0 pending');
+      await tester.tap(sync);
+      await tester.pumpAndSettle();
+      expect(find.text('Sign in to sync'), findsOneWidget);
+      expect(find.text('Sign out?'), findsNothing);
+      expect(logouts, 0);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(logouts, 0);
+      await tester.tap(sync);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Retry sync'));
+      await tester.pumpAndSettle();
+      expect(syncs, 1);
+      expect(logouts, 0);
+      await tester.tap(sync);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sign in again'));
+      await tester.pumpAndSettle();
+      expect(logouts, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      final closing = db.close();
+      await tester.pumpAndSettle();
+      await closing;
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+
   testWidgets('adaptive shell creates and completes canonical task', (
     tester,
   ) async {
@@ -45,7 +108,46 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.byTooltip('MindFlow'), findsOneWidget);
+    expect(find.text('offline · 0 pending'), findsNothing);
+    expect(find.text('Tasks'), findsNothing);
+    final syncButton = tester.widget<IconButton>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is IconButton &&
+            widget.tooltip == 'Sync: offline · 0 pending',
+      ),
+    );
+    expect(
+      syncButton.color,
+      Theme.of(tester.element(find.byType(Scaffold).first)).colorScheme.error,
+    );
     expect(find.text('Select a task to see its details'), findsOneWidget);
+    expect(find.text('New Space'), findsNothing);
+    expect(find.text('Show archived'), findsNothing);
+    await tester.tap(find.byTooltip('Spaces options'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add'), findsNothing);
+    expect(find.byTooltip('Add Spaces'), findsOneWidget);
+    expect(find.text('Show archived'), findsOneWidget);
+    await tester.tap(
+      find.ancestor(
+        of: find.text('Show archived'),
+        matching: find.byType(PopupMenuItem<String>),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Tags'));
+    await tester.pumpAndSettle();
+    expect(find.byIcon(Icons.chevron_right), findsOneWidget);
+    await tester.tap(find.text('Tags'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Notes'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('Add note'), findsOneWidget);
+    await tester.tap(find.text('Inbox'));
+    await tester.pumpAndSettle();
+
     tester.view.physicalSize = const Size(500, 900);
     await tester.pumpAndSettle();
     expect(find.byTooltip('MindFlow'), findsOneWidget);
@@ -90,6 +192,8 @@ void main() {
     await tester.tap(find.byType(Checkbox));
     await tester.pumpAndSettle();
     expect(find.text('Write a thoughtful plan'), findsNothing);
+    await tester.tap(find.byTooltip('Task view options'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Completed'));
     await tester.pumpAndSettle();
     expect(find.text('Write a thoughtful plan'), findsOneWidget);
@@ -167,6 +271,10 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: view);
       expect(find.text('Add task'), findsOneWidget);
+      expect(
+        find.byTooltip('Menu'),
+        view == 'tasks' ? findsNothing : findsOneWidget,
+      );
     }
     expect(find.byType(NavigationBar), findsOneWidget);
     await tester.tap(find.byTooltip('Menu'));

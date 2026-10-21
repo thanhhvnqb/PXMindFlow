@@ -1,4 +1,5 @@
 import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mindflow/core/db/database.dart';
@@ -7,6 +8,31 @@ import 'package:mindflow/features/tasks/domain/item.dart';
 import 'package:mindflow/features/tasks/domain/task_query.dart';
 
 void main() {
+  test(
+    'Next 7 days uses local calendar boundaries and excludes completed tasks',
+    () {
+      final items = [
+        for (final day in [14, 15, 21, 22])
+          Item('$day', 'task', 0, {
+            'title': '$day',
+            'due_date': '2026-10-$day',
+          }),
+        Item('done', 'task', 0, {
+          'title': 'Done',
+          'due_date': '2026-10-16',
+          'completed': true,
+        }),
+      ];
+      expect(
+        const TaskQuery(
+          view: 'Next 7 days',
+          sort: 'due',
+        ).apply(items, DateTime(2026, 10, 15, 23, 59)).map((i) => i.id),
+        ['15', '21'],
+      );
+    },
+  );
+
   test('task views intersect list and priority; dates sort before undated', () {
     final items = [
       Item('a', 'task', 0, {'title': 'Undated', 'priority': 3}),

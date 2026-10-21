@@ -22,6 +22,8 @@ class TaskQuery {
   List<Item> apply(Iterable<Item> items, DateTime now) {
     final organization = Organization(items);
     final today = DateFormat('yyyy-MM-dd').format(now);
+    final weekEnd = DateFormat('yyyy-MM-dd')
+        .format(DateTime(now.year, now.month, now.day + 7));
     final result = items.where((i) {
       if (i.kind != 'task' || i.deleted) return false;
       if (!includeArchived && organization.archived(i)) return false;
@@ -46,6 +48,11 @@ class TaskQuery {
                   organization.inbox(i)),
         'Today' =>
           !i.completed && i.dueDate != null && i.dueDate!.compareTo(today) <= 0,
+        'Next 7 days' =>
+          !i.completed &&
+              i.dueDate != null &&
+              i.dueDate!.compareTo(today) >= 0 &&
+              i.dueDate!.compareTo(weekEnd) < 0,
         'Upcoming' =>
           !i.completed && i.dueDate != null && i.dueDate!.compareTo(today) > 0,
         'Completed' => i.completed,

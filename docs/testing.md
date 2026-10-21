@@ -1,5 +1,44 @@
 # Verification
 
+## Running development recovery, 2026-10-21
+
+The loopback web server was still running the October 19 build from before
+the sync authentication UI fix. Restarted it from this checkout on port 8080
+with the same localhost API URL; browser storage was not accessed or cleared.
+The active API on port 8000 belongs to this checkout's existing `pompano`
+Compose project, while `pxmindflow` is stopped. Preserved both projects and
+their volumes. Active API logs showed missing `auth_rate_windows`; applied
+the existing additive migrations through `alembic upgrade head` in that API.
+`alembic current` now reports 0003, `alembic check` reports no new operations,
+and a deliberately invalid refresh token returns HTTP 401 rather than a database
+500. No real account credentials were used. Workstation browser/session recovery
+still needs verification after reloading the updated web app.
+
+## Sync authentication action, 2026-10-19
+
+The sync button now explains failed session renewal instead of opening the
+sign-out confirmation. It offers cancel, retry and explicit sign-in recovery,
+retaining the account database/outbox. A widget regression verifies all three
+actions and that cancel/retry never invoke account logout. The authentication
+warning uses a sync-problem icon and a localized tooltip.
+
+`flutter analyze` passed; `flutter test` passed 49 tests with one optional
+HTTP integration skip. Manual workstation browser/tunnel and native platform
+checks were not run. Backend and schema are unchanged.
+
+## API image permissions repair, 2026-10-19
+
+Reproduced the ASGI import failure: root-owned source directories had mode
+0700, blocking the non-root runtime user. Docker COPY now assigns source
+ownership to UID/GID 10001. The test service uses image source rather than
+a bind mount that would restore restrictive host permissions.
+
+The development image build passed; its default non-root user started Uvicorn
+and served `/health` with HTTP 200 in a network-isolated smoke check.
+`scripts/test_backend.sh` passed all 15 tests, fresh migrations and Alembic
+schema check; isolated containers were removed. Existing development database
+volumes were untouched. Flutter/platform checks were not run for this repair.
+
 ## Stable SDK alignment, 2026-10-17
 
 - Google release feeds confirm Flutter 3.47.7 stable and Dart 3.13.5 are the newest stable releases. The host already has this exact Flutter revision and bundled Dart; no shared SDK installation changes were needed.
