@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -58,6 +59,9 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
   ];
   String? activeTaskId;
   bool inlineDetails = false;
+  double organizationWidth = 230;
+  double? detailsWidth;
+  double? resizePointerX;
   String filter = 'Inbox';
   final collapsedSections = <String>{};
   String search = '';
@@ -69,6 +73,12 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
   String? projectId, tagId;
   bool includeArchived = false;
   bool showArchivedTags = false;
+  bool showArchivedSpaces = false;
+  bool showArchivedProjects = false;
+  bool get taskIncludeArchived =>
+      includeArchived ||
+      (listId != null && showArchivedSpaces) ||
+      (projectId != null && showArchivedProjects);
   DateTime date = DateTime.now();
   Timer? ticker;
   bool finishing = false;
@@ -583,7 +593,11 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
 
   Widget organizationSection(String title, String kind, List<Item> all) {
     final collapsed = collapsedSections.contains(kind);
-    final archived = kind == 'tag' ? showArchivedTags : includeArchived;
+    final archived = switch (kind) {
+      'tag' => showArchivedTags,
+      'project' => showArchivedProjects,
+      _ => showArchivedSpaces,
+    };
     final organization = Organization(all);
     final entries = all.where(
       (i) =>
@@ -619,56 +633,29 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                 }),
               ),
             ),
-            PopupMenuButton<String>(
-              tooltip: '$title ${label('options', 'tùy chọn')}',
-              icon: const Icon(Icons.more_horiz, size: 18),
-              onSelected: (value) {
-                if (value == 'archive') {
-                  setState(() {
-                    if (kind == 'tag') {
-                      showArchivedTags = !showArchivedTags;
-                      tagId = null;
-                    } else {
-                      includeArchived = !includeArchived;
-                      listId = null;
-                      projectId = null;
-                    }
-                  });
+            IconButton(
+              tooltip:
+                  '${label(archived ? 'Hide archived' : 'Show archived', archived ? 'Ẩn mục lưu trữ' : 'Hiện mục lưu trữ')} $title',
+              isSelected: archived,
+              icon: const Icon(Icons.inventory_2_outlined, size: 18),
+              selectedIcon: const Icon(Icons.inventory_2, size: 18),
+              style: IconButton.styleFrom(
+                backgroundColor: archived
+                    ? Theme.of(context).colorScheme.secondaryContainer
+                    : null,
+              ),
+              onPressed: () => setState(() {
+                if (kind == 'tag') {
+                  showArchivedTags = !showArchivedTags;
+                  tagId = null;
+                } else if (kind == 'project') {
+                  showArchivedProjects = !showArchivedProjects;
+                  projectId = null;
                 } else {
-                  setState(() {
-                    listId = null;
-                    projectId = null;
-                    tagId = null;
-                    filter = 'All';
-                  });
+                  showArchivedSpaces = !showArchivedSpaces;
+                  listId = null;
                 }
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: 'all',
-                  child: Text(label('Show all', 'Hiện tất cả')),
-                ),
-                PopupMenuItem(
-                  value: 'archive',
-                  child: Semantics(
-                    checked: archived,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            label('Show archived', 'Hiện mục lưu trữ'),
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        SizedBox(
-                          width: 24,
-                          child: archived ? const Icon(Icons.check) : null,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+              }),
             ),
             IconButton(
               tooltip: '${label('Add', 'Thêm')} $title',
@@ -812,10 +799,85 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     ],
   );
 
+  Widget resizeDivider(
+    String name,
+    ValueChanged<double> resize,
+    VoidCallback startResize,
+  ) => Semantics(
+    label: name,
+    onIncrease: () => resize(24),
+    onDecrease: () => resize(-24),
+    child: Focus(
+      onKeyEvent: (_, event) {
+        if (event is KeyDownEvent || event is KeyRepeatEvent) {
+          if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+            resize(-24);
+            return KeyEventResult.handled;
+          }
+          if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+            resize(24);
+            return KeyEventResult.handled;
+          }
+        }
+        return KeyEventResult.ignored;
+      },
+      child: Builder(
+        builder: (context) => MouseRegion(
+          cursor: SystemMouseCursors.resizeColumn,
+          child: Tooltip(
+            message: name,
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Focus.of(context).requestFocus(),
+              dragStartBehavior: DragStartBehavior.down,
+              onHorizontalDragStart: (event) {
+                startResize();
+                resizePointerX = event.globalPosition.dx;
+              },
+              onHorizontalDragUpdate: (event) {
+                final previous = resizePointerX;
+                resizePointerX = event.globalPosition.dx;
+                if (previous != null) {
+                  resize(event.globalPosition.dx - previous);
+                }
+              },
+              onHorizontalDragEnd: (_) => resizePointerX = null,
+              onHorizontalDragCancel: () => resizePointerX = null,
+              child: SizedBox(
+                width: 8,
+                child: Center(
+                  child: ColoredBox(
+                    color: Focus.of(context).hasFocus
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).dividerColor,
+                    child: const SizedBox(width: 1, height: double.infinity),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+
   Widget taskWorkspace(List<Item> all) => LayoutBuilder(
     builder: (context, box) {
       final showLists = box.maxWidth >= 850;
       inlineDetails = box.maxWidth >= 1100;
+      // Keep the task list usable when the window shrinks after resizing.
+      final leftWidth = organizationWidth.clamp(
+        180.0,
+        (box.maxWidth - 360 - (inlineDetails ? 280 + 16 : 8)).clamp(
+          180.0,
+          420.0,
+        ),
+      );
+      final rightWidth = (detailsWidth ?? (box.maxWidth - leftWidth - 16) / 2)
+          .clamp(
+            280.0,
+            (box.maxWidth - leftWidth - 360 - 16).clamp(280.0, double.infinity),
+          );
       final active = all
           .where((i) => i.id == activeTaskId && !i.deleted)
           .firstOrNull;
@@ -823,8 +885,18 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (showLists) ...[
-            SizedBox(width: 230, child: taskOrganization(all)),
-            const VerticalDivider(width: 1),
+            SizedBox(width: leftWidth, child: taskOrganization(all)),
+            resizeDivider(
+              label('Resize organization column', 'Đổi độ rộng cột tổ chức'),
+              (delta) => setState(() {
+                organizationWidth = (organizationWidth + delta).clamp(
+                  180.0,
+                  (box.maxWidth - 360 - (inlineDetails ? rightWidth + 16 : 8))
+                      .clamp(180.0, 420.0),
+                );
+              }),
+              () => organizationWidth = leftWidth,
+            ),
           ],
           Expanded(
             child: SingleChildScrollView(
@@ -905,7 +977,8 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
                     for (final note in all.where(
                       (i) =>
                           i.kind == 'note' &&
-                          (includeArchived || !Organization(all).archived(i)) &&
+                          (taskIncludeArchived ||
+                              !Organization(all).archived(i)) &&
                           (filter == 'Notes' ||
                               (projectId != null
                                   ? i.data['project_id'] == projectId
@@ -938,9 +1011,21 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
             ),
           ),
           if (inlineDetails) ...[
-            const VerticalDivider(width: 1),
+            resizeDivider(
+              label('Resize task details column', 'Đổi độ rộng cột chi tiết'),
+              (delta) => setState(() {
+                detailsWidth = ((detailsWidth ?? rightWidth) - delta).clamp(
+                  280.0,
+                  (box.maxWidth - leftWidth - 360 - 16).clamp(
+                    280.0,
+                    double.infinity,
+                  ),
+                );
+              }),
+              () => detailsWidth = rightWidth,
+            ),
             SizedBox(
-              width: 330,
+              width: rightWidth,
               child: active == null
                   ? Center(
                       child: Padding(
@@ -1009,10 +1094,10 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
           '$pending ${label('pending', 'chờ đồng bộ')}'
           '${taskConflicts > 0 ? ' · $taskConflicts ${label('task conflicts', 'công việc xung đột')}' : ''}',
       color: failed ? Theme.of(context).colorScheme.error : null,
-      onPressed: attention
+      onPressed: widget.status == 'sign_in_required'
+          ? widget.logout
+          : attention
           ? showConflicts
-          : widget.status == 'sign_in_required'
-          ? showSyncAuthentication
           : widget.sync,
       icon: Badge(
         isLabelVisible: taskConflicts > 0,
@@ -1030,48 +1115,13 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
     );
   }
 
-  Future<void> showSyncAuthentication() async {
-    final signIn = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(label('Sign in to sync', 'Đăng nhập lại để đồng bộ')),
-        content: Text(
-          label(
-            'Your session could not be renewed. Sign in again to resume sync. '
-                'Your local data and pending changes will be retained for this account.',
-            'Không thể gia hạn phiên đăng nhập. Hãy đăng nhập lại để tiếp tục đồng bộ. '
-                'Dữ liệu cục bộ và các thay đổi chưa đồng bộ của tài khoản này sẽ được giữ lại.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(label('Cancel', 'Hủy')),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context, false);
-              widget.sync();
-            },
-            child: Text(label('Retry sync', 'Thử đồng bộ lại')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: Text(label('Sign in again', 'Đăng nhập lại')),
-          ),
-        ],
-      ),
-    );
-    if (signIn == true && mounted) await widget.logout();
-  }
-
   Widget tasks(List<Item> all) {
     final tasks = TaskQuery(
       view: filter,
       listId: listId,
       projectId: projectId,
       tagId: tagId,
-      includeArchived: includeArchived,
+      includeArchived: taskIncludeArchived,
       priority: priorityFilter,
       sort: taskSort,
     ).apply(all, DateTime.now());
@@ -1731,30 +1781,43 @@ class _MindFlowShellState extends ConsumerState<MindFlowShell> {
   }
 
   Future<void> logout() async {
-    final pending = ref.read(pendingProvider).asData?.value ?? 0;
+    final pending = ref.read(pendingProvider).asData?.value;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sign out?'),
+        title: Text(label('Sign out?', 'Đăng xuất?')),
         content: Text(
-          '$pending pending operations. Your local data and unsynced changes will be retained for this account.',
+          pending != null && pending > 0
+              ? label(
+                  'You have $pending changes waiting to sync. Your data will stay on this device. Sign in to this account again to resume syncing.',
+                  'Bạn có $pending thay đổi đang chờ đồng bộ. Dữ liệu sẽ được giữ trên thiết bị này. Đăng nhập lại vào tài khoản này để tiếp tục đồng bộ.',
+                )
+              : label(
+                  'Your data will stay on this device. Sign in to this account again to continue.',
+                  'Dữ liệu sẽ được giữ trên thiết bị này. Đăng nhập lại vào tài khoản này để tiếp tục.',
+                ),
         ),
         actions: [
           TextButton(
-            onPressed: () {
-              Navigator.pop(context, false);
-              widget.sync();
-            },
-            child: const Text('Sync first'),
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(label('Cancel', 'Hủy')),
           ),
+          if (pending != null && pending > 0)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+                widget.sync();
+              },
+              child: Text(label('Sync first', 'Đồng bộ trước')),
+            ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Sign out and retain'),
+            child: Text(label('Sign out', 'Đăng xuất')),
           ),
         ],
       ),
     );
-    if (confirmed == true) await widget.logout();
+    if (confirmed == true && mounted) await widget.logout();
   }
 
   @override

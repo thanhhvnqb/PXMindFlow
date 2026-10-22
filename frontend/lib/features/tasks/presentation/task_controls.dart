@@ -226,7 +226,7 @@ class QuickTaskEntry extends StatefulWidget {
 class _QuickTaskEntryState extends State<QuickTaskEntry> {
   final title = TextEditingController();
   final focus = FocusNode();
-  String? due;
+  String? due = DateFormat('yyyy-MM-dd').format(DateTime.now());
   String? dueAt;
   int priority = 0;
   bool saving = false;

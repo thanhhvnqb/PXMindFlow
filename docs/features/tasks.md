@@ -31,4 +31,6 @@ subtask creation use the canonical local records. See [organization](organizatio
 Task notes now share the [Markdown editor](notes.md) with independent Space and
 project notes. Original source text remains the persisted and synchronized value.
 
-Sidebar quick views are Today, Next 7 days (today plus six local calendar days), Inbox and Notes. All tasks and Completed live in the My tasks overflow menu. Organization sections collapse independently; creation uses a + button to the right of each section overflow menu; archive visibility remains in the menu with a trailing checkmark.
+Sidebar quick views are Today, Next 7 days (today plus six local calendar days), Inbox and Notes. All tasks and Completed live in the My tasks overflow menu. Organization sections collapse independently; creation uses a + button beside a direct archive visibility toggle. The toggle shows its selected state and offers Show archived or Hide archived. Spaces, Projects and Tags each have independent archive visibility. Selecting an archived Space or Project includes its tasks and notes without changing another section’s toggle.
+
+Quick task entry initializes its due date to today in the device local calendar, with no due time. Users can change or clear it; the selected date carries into the expanded editor and subsequent quick entries. Existing tasks are unchanged.

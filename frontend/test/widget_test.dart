@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,68 +11,51 @@ import 'package:mindflow/features/tasks/data/local_repository.dart';
 import 'package:mindflow/shared/shell.dart';
 
 void main() {
-  testWidgets(
-    'expired sync session explains recovery and retains account data',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      tester.view.physicalSize = const Size(1400, 1000);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final db = AppDatabase.testing(NativeDatabase.memory());
-      final repository = LocalRepository(db);
-      var syncs = 0;
-      var logouts = 0;
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [repositoryProvider.overrideWithValue(repository)],
-          child: MaterialApp(
-            home: MindFlowShell(
-              view: 'tasks',
-              status: 'sign_in_required',
-              sync: () {
-                syncs++;
-              },
-              logout: () async {
-                logouts++;
-              },
-              toggleTheme: () {},
-              toggleLanguage: () {},
-              vietnamese: false,
-            ),
+  testWidgets('expired sync session opens sign-in directly', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    tester.view.physicalSize = const Size(1400, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final db = AppDatabase.testing(NativeDatabase.memory());
+    final repository = LocalRepository(db);
+    var syncs = 0;
+    var logouts = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [repositoryProvider.overrideWithValue(repository)],
+        child: MaterialApp(
+          home: MindFlowShell(
+            view: 'tasks',
+            status: 'sign_in_required',
+            sync: () {
+              syncs++;
+            },
+            logout: () async {
+              logouts++;
+            },
+            toggleTheme: () {},
+            toggleLanguage: () {},
+            vietnamese: false,
           ),
         ),
-      );
-      await tester.pumpAndSettle();
-      final sync = find.byTooltip('Sync: Sign in required · 0 pending');
-      await tester.tap(sync);
-      await tester.pumpAndSettle();
-      expect(find.text('Sign in to sync'), findsOneWidget);
-      expect(find.text('Sign out?'), findsNothing);
-      expect(logouts, 0);
-      await tester.tap(find.text('Cancel'));
-      await tester.pumpAndSettle();
-      expect(logouts, 0);
-      await tester.tap(sync);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Retry sync'));
-      await tester.pumpAndSettle();
-      expect(syncs, 1);
-      expect(logouts, 0);
-      await tester.tap(sync);
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Sign in again'));
-      await tester.pumpAndSettle();
-      expect(logouts, 1);
-      await tester.pumpWidget(const SizedBox.shrink());
-      await tester.pumpAndSettle();
-      final closing = db.close();
-      await tester.pumpAndSettle();
-      await closing;
-      debugDefaultTargetPlatformOverride = null;
-    },
-  );
+      ),
+    );
+    await tester.pumpAndSettle();
+    final sync = find.byTooltip('Sync: Sign in required · 0 pending');
+    await tester.tap(sync);
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(syncs, 0);
+    expect(logouts, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    final closing = db.close();
+    await tester.pumpAndSettle();
+    await closing;
+    debugDefaultTargetPlatformOverride = null;
+  });
 
   testWidgets('adaptive shell creates and completes canonical task', (
     tester,
@@ -122,19 +106,86 @@ void main() {
       Theme.of(tester.element(find.byType(Scaffold).first)).colorScheme.error,
     );
     expect(find.text('Select a task to see its details'), findsOneWidget);
+    final leftDivider = find.byTooltip('Resize organization column');
+    final rightDivider = find.byTooltip('Resize task details column');
+    final leftStart = tester.getCenter(leftDivider).dx;
+    final rightStart = tester.getCenter(rightDivider).dx;
+    final workspaceRight = tester.getTopRight(find.byType(Scaffold).first).dx;
+    expect(
+      rightStart - leftStart - 8,
+      closeTo(workspaceRight - rightStart - 4, 1),
+    );
+    await tester.drag(leftDivider, const Offset(60, 0), touchSlopX: 0);
+    await tester.pumpAndSettle();
+    expect(tester.getCenter(leftDivider).dx, closeTo(leftStart + 60, 1));
+    final rightBeforeDrag = tester.getCenter(rightDivider).dx;
+    await tester.drag(rightDivider, const Offset(-80, 0), touchSlopX: 0);
+    await tester.pumpAndSettle();
+    expect(tester.getCenter(rightDivider).dx, closeTo(rightBeforeDrag - 80, 1));
+    final dragStart = tester.getCenter(rightDivider);
+    final gesture = await tester.startGesture(
+      dragStart,
+      kind: PointerDeviceKind.mouse,
+    );
+    // Multiple pointer events before a frame must all contribute to the width.
+    await gesture.moveTo(dragStart + const Offset(25, 0));
+    await gesture.moveTo(dragStart + const Offset(50, 0));
+    await gesture.moveTo(dragStart + const Offset(75, 0));
+    await tester.pump();
+    expect(tester.getCenter(rightDivider).dx, closeTo(dragStart.dx + 75, 1));
+    await gesture.moveTo(dragStart + const Offset(100, 0));
+    await tester.pump();
+    expect(tester.getCenter(rightDivider).dx, closeTo(dragStart.dx + 100, 1));
+    await gesture.up();
+    await tester.drag(leftDivider, const Offset(2000, 0));
+    await tester.drag(rightDivider, const Offset(-2000, 0));
+    await tester.pumpAndSettle();
+    expect(
+      tester.getCenter(rightDivider).dx - tester.getCenter(leftDivider).dx,
+      greaterThanOrEqualTo(368),
+    );
+    expect(tester.takeException(), isNull);
+
     expect(find.text('New Space'), findsNothing);
     expect(find.text('Show archived'), findsNothing);
-    await tester.tap(find.byTooltip('Spaces options'));
-    await tester.pumpAndSettle();
-    expect(find.text('Add'), findsNothing);
     expect(find.byTooltip('Add Spaces'), findsOneWidget);
-    expect(find.text('Show archived'), findsOneWidget);
-    await tester.tap(
-      find.ancestor(
-        of: find.text('Show archived'),
-        matching: find.byType(PopupMenuItem<String>),
-      ),
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is IconButton &&
+                  widget.tooltip == 'Show archived Spaces',
+            ),
+          )
+          .isSelected,
+      isFalse,
     );
+    await tester.tap(find.byTooltip('Show archived Spaces'));
+    await tester.pumpAndSettle();
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is IconButton &&
+                  widget.tooltip == 'Hide archived Spaces',
+            ),
+          )
+          .isSelected,
+      isTrue,
+    );
+    expect(find.byTooltip('Show archived Projects'), findsOneWidget);
+    await tester.tap(find.byTooltip('Show archived Projects'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Hide archived Projects'), findsOneWidget);
+    expect(find.byTooltip('Hide archived Spaces'), findsOneWidget);
+    expect(find.byTooltip('Show archived Tags'), findsOneWidget);
+    await tester.tap(find.byTooltip('Hide archived Spaces'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Show archived Spaces'), findsOneWidget);
+    expect(find.byTooltip('Hide archived Projects'), findsOneWidget);
+    await tester.tap(find.byTooltip('Hide archived Projects'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Tags'));
     await tester.pumpAndSettle();

@@ -1,1 +1,4 @@
-flutter run -d web-server --web-hostname 127.0.0.1 --web-port 8080 --dart-define=API_URL=http://localhost:8000/api/v1
+#!/usr/bin/env bash
+set -euo pipefail
+project_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+exec bash "$project_root/scripts/run_web.sh" "$@"

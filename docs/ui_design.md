@@ -26,11 +26,17 @@ separate archive from project status. Include-archived and archived-tag controls
 keep old work discoverable and restorable. New Projects require a Space; task
 quick entry still works in Inbox with no organization setup.
 
-The sync icon sits next to the profile controls in the desktop rail and mobile drawer, without a status/pending text row. Tasks omits the top page header to maximize workspace height; other screens retain their page headers. Tasks keeps its organization drawer trigger in the task toolbar. Normal sync uses the default icon color; offline, sign-in required and conflicts use error red. A badge counts distinct conflicting tasks. The tooltip retains status and pending details. Clicking opens conflicts, sign-in recovery, or manual sync as appropriate.
+The sync icon sits next to the profile controls in the desktop rail and mobile drawer, without a status/pending text row. Tasks omits the top page header to maximize workspace height; other screens retain their page headers. Tasks keeps its organization drawer trigger in the task toolbar. Normal sync uses the default icon color; offline, sign-in required and conflicts use error red. A badge counts distinct conflicting tasks. The tooltip retains status and pending details. When sign-in is required, clicking opens the sign-in page directly, including when conflicts exist. Otherwise clicking opens conflicts or starts manual sync as appropriate.
 
 The organization sidebar exposes Today, Next 7 days, Inbox and Notes. Spaces,
-Projects and Tags each have a collapsible heading and an overflow menu for Show all and Show archived, plus a separate + button to the right for creation. Archive visibility uses a trailing checkmark. Archived records remain hidden initially. Record
+Projects and Tags each have a collapsible heading, a direct archive visibility toggle, and a separate + button to the right for creation. The archive icon is outlined when hidden and filled with a selected background when shown; its tooltip offers Show archived or Hide archived. Spaces, Projects and Tags each have independent archive visibility. Selecting an archived Space or Project includes its tasks and notes without changing another section’s toggle. Archived records remain hidden initially. Record
 editing and archive/restore actions use row overflow menus. All tasks and
 Completed remain accessible through My tasks overflow. Notes projects existing
 canonical note records; creation still requires a Space or Project in the editor.
 Next 7 days covers today through six days later using local calendar dates.
+
+Sign-out confirmation explains that account data stays on the device and offers Cancel and Sign out. When pending changes exist, it also shows their count and Sync first. The dialog supports English and Vietnamese; signing out retains local data and the outbox.
+
+Task workspace columns have draggable 8 px dividers. Organization adjusts between 180–420 px. The task list and details split the remaining width equally by default; dragging the details divider sets a custom width, with at least 280 px for details and 360 px for the task list. Focus a divider and use Left/Right to move it; accessible increase/decrease actions are supported. Widths remain in shell state during navigation and adapt to window resizing; compact drawer/dialog breakpoints remain unchanged. Widths reset on app restart.
+
+Divider dragging uses global pointer movement and accumulates width changes independently of render frames, so moving the divider does not distort pointer deltas or drop rapid updates.
