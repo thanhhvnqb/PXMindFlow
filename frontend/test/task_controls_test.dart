@@ -1,8 +1,38 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:intl/intl.dart';
 import 'package:mindflow/features/tasks/presentation/task_controls.dart';
 
 void main() {
+  testWidgets('quick entry defaults to today and allows clearing the date', (
+    tester,
+  ) async {
+    final dates = <String?>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: QuickTaskEntry(
+            vietnamese: false,
+            onDetails: (_, _, _, _) async => false,
+            onSave: (_, due, _, _) async => dates.add(due),
+          ),
+        ),
+      ),
+    );
+    expect(find.text('Today'), findsOneWidget);
+    await tester.enterText(find.byType(TextField), 'Due today');
+    await tester.tap(find.byTooltip('Add task'));
+    await tester.pumpAndSettle();
+    expect(dates.single, DateFormat('yyyy-MM-dd').format(DateTime.now()));
+    await tester.tap(find.text('Today'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Clear'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'No date');
+    await tester.tap(find.byTooltip('Add task'));
+    await tester.pumpAndSettle();
+    expect(dates.last, isNull);
+  });
   testWidgets('time selection emits UTC and clearing time preserves date', (
     tester,
   ) async {
@@ -96,7 +126,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('High'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Set due date'));
+      await tester.tap(find.text('Today'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Tomorrow'));
       await tester.pumpAndSettle();

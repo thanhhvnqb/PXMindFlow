@@ -187,7 +187,7 @@ These rules apply to Codex CLI in addition to the engineering conventions above.
 
 **Default behavior: execute autonomously whenever possible.** Do not request approval for commands that are permitted by the active sandbox and comply with the rules below.
 
-- Treat the currently opened MindFlow repository as the authorized write workspace.
+- Treat the currently opened MindFlow repository or worktree as the authorized write workspace. MindFlow worktree folders under `/home/thanh/orca/workspaces/pxmindflow/` are also authorized for task-related project operations without additional approval. This does not authorize unrelated host paths or changes to unrelated worktrees.
 - **Read-only operations:** Run commands such as `ls`, `find`, `rg`, `grep`, `cat`, `head`, `git status`, `git diff`, and `git log` without requesting approval whenever permitted by the sandbox. Reading files outside the repository is allowed if normal OS permissions permit it.
 - **Workspace operations:** Freely create, edit, move, and delete non-protected project files, install project-local dependencies, generate code, format, lint, build, and run tests.
 - **Local development:** Run development servers, project-local tools, and non-destructive database migrations without unnecessary confirmation.
@@ -203,7 +203,7 @@ These rules apply to Codex CLI in addition to the engineering conventions above.
 The MindFlow development environment may use the host Docker daemon for backend services and PostgreSQL.
 
 - **Autonomous operations:** Execute project-scoped `docker compose build`, `up`, `ps`, `logs`, `exec`, `run`, `restart`, and non-destructive `down` without requesting approval when permitted by the sandbox.
-- **Project isolation:** Always use a distinct Compose project name, reuse the existing `pxmindflow` development project. Operate only on this project's containers, images, networks, and volumes.
+- **Project isolation:** Inspect `docker compose ls -a` and match Compose configuration paths to the active repository/worktree before selecting a project. Reuse `pxmindflow` for the main checkout and the existing worktree-specific project for a worktree. Routine operations and non-destructive migrations on the matching project are authorized without additional approval. Operate only on that project's resources; preserve its database volume and do not switch to another checkout's database. Isolated test projects created by the repository test scripts remain authorized.
 - **Bind mounts:** Restrict bind mounts to paths within the repository. Never mount host system directories, the host home directory, the filesystem root, or the Docker socket into containers without explicit approval.
 - **Container privileges:** Do not enable privileged containers, host PID/IPC namespaces, host networking, extra host devices, additional Linux capabilities, or relaxed security settings without explicit approval.
 - **Destructive Docker operations:** Request approval before deleting persistent project volumes, resetting PostgreSQL, dropping databases, or performing destructive migrations.
@@ -230,9 +230,11 @@ and automated tests on that server; open the browser on the developer workstatio
 through an SSH tunnel. Keep API and Web ports bound to loopback. Do not expose
 PostgreSQL or development servers publicly to enable testing.
 
-The existing development Compose project is `pxmindflow`. Reuse it to preserve
-its database volume; inspect `docker compose ls -a` before choosing a project name.
-Do not create a new `mindflow` project for an existing `pxmindflow` database.
+The main checkout uses Compose project `pxmindflow`; this worktree uses `hydra`.
+Inspect `docker compose ls -a` and verify configuration paths before choosing a
+project. Reuse the active checkout/worktree's existing project and database volume.
+Worktree project operations are authorized under section 7.1 without additional
+approval. Do not create a replacement project for an existing database.
 
 On the workstation, keep this tunnel running (replace `user@server`):
 
@@ -261,10 +263,12 @@ the automation host and must be reported separately from manual tunnel testing.
 
 ```bash
 # backend: run API and PostgreSQL in Docker
+# Select the verified project for the active checkout/worktree.
+compose_project=hydra  # use pxmindflow in the main checkout
 test -f .env || cp .env.example .env
-docker compose -p pxmindflow up --build -d
-docker compose -p pxmindflow logs -f api
-docker compose -p pxmindflow exec api alembic upgrade head
+docker compose -p "$compose_project" up --build -d
+docker compose -p "$compose_project" logs -f api
+docker compose -p "$compose_project" exec api alembic upgrade head
 scripts/test_backend.sh  # isolated database; never run pytest against development data
 # Flutter: run on selected platform, separately from Docker
 cd frontend

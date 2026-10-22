@@ -235,3 +235,17 @@ Stop the development environment with `docker compose -p pxmindflow down` when n
 Run `scripts/run_web.sh` from the intended checkout; it resolves and prints that checkout's frontend directory. Keep only one Web server on port 8080. A server launched from another worktree will keep serving that worktree, even after edits in this one. On Linux, inspect the Flutter process working directory with `readlink /proc/<pid>/cwd`. Restart the intended checkout and reload the same browser origin without clearing site data.
 
 The HTML shell displays loading progress before Flutter's first frame and offers a reload button after 30 seconds or a startup error. `flutter_bootstrap.js` loads CanvasKit from the same server (`canvaskit/`) instead of requiring access to Google's renderer CDN. Debug compilation and the initial download may take time; wait for Flutter to print “is being served” before opening the browser. If the app still does not render, inspect Console and Network and preserve browser storage.
+
+### Automatic hot reload
+
+Both `bash scripts/run_web.sh` and `bash frontend/run_web.sh` start the same
+checkout-aware Web launcher with automatic hot reload. Python 3 (standard library
+only) watches Dart files under `frontend/lib`, debounces saves, and requests
+Flutter hot reload through its PID-file signal handler. Keep the browser connected
+to the running debug app through the SSH tunnel. Terminal `r` / `R` remain
+available for manual reload / restart. Stop with Ctrl+C.
+
+Changes to dependencies, Web bootstrap files, or assets require a manual restart;
+changes that Flutter cannot hot reload may also require `R`. `WEB_PORT` and
+`API_URL` overrides remain supported. This launcher targets the Linux development
+server; workstation browser/tunnel behavior must be verified separately.
